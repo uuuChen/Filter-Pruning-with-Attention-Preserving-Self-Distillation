@@ -1,2 +1,4 @@
 data/
 saves/
+.idea/
+__pycache__/
