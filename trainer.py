@@ -65,10 +65,9 @@ class Trainer(object):
         print(e_result_dict)
         return e_result_dict
 
-    def train(self, model_file=None, data_parallel=True):
+    def train(self, data_parallel=True):
         """ Train Loop """
         self.model.train()  # train mode
-        load_model(self.model, model_file, self.device)
         model = self.model.to(self.device)
         if data_parallel:  # use Data Parallelism with Multi-GPU
             model = nn.DataParallel(model)
@@ -80,8 +79,8 @@ class Trainer(object):
             eval_result = self._eval_epoch(model)
             if best_top1 < eval_result['top1']:
                 best_top1 = eval_result['top1']
-                save_model(model, self._get_save_model_path(epoch))
-        save_model(model, self._get_save_model_path(self.args.n_epochs))
+                save_model(model.module, self._get_save_model_path(epoch))
+        save_model(model.module, self._get_save_model_path(self.args.n_epochs))
 
     def eval(self, model_file=None, data_parallel=True):
         """ Evaluation Loop """

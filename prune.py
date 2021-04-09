@@ -1,8 +1,8 @@
 import argparse
 import os
 
-from util import check_dirs_exist, get_device, accuracy
-from data_loader import get_cifar100
+from util import check_dirs_exist, get_device, accuracy, load_model, save_model
+from data_loader import DataLoader
 from models.alexnet import alexnet
 from trainer import Trainer
 
@@ -64,19 +64,20 @@ class PrunedModelTrainer(Trainer):
 def main():
     check_dirs_exist([args.save_dir])
     if args.dataset == 'cifar100':
-        train_loader, eval_loader = get_cifar100(args.batch_size)  # get data loader
+        train_loader, eval_loader = DataLoader.get_cifar100(args.batch_size)  # get data loader
         num_classes = 100
     else:
         raise ValueError
     if args.model == 'alexnet':
         model = alexnet(num_classes=num_classes)
+        load_model(model, 'saves/alexnet_cifar100/model_epochs_0.pt', get_device())
     else:
         raise ValueError
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
     base_trainer_cfg = (args, model, train_loader, eval_loader, optimizer, args.save_dir, get_device())
     writer = SummaryWriter(log_dir=args.log_dir)  # for tensorboardX
     trainer = PrunedModelTrainer(writer, *base_trainer_cfg)
-    trainer.train(model_file=args.model_file)
+    trainer.train()
 
 
 if __name__ == '__main__':

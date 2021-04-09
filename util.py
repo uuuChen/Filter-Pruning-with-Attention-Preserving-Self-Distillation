@@ -47,7 +47,7 @@ def accuracy(output, target, topk=(1,)):
 def load_model(model, file_path, device='cuda'):
     print('Loading the model from', file_path)
     if file_path is not None:
-        model.load_state_dict(torch.load(file_path, map_location=device), strict=False)
+        model.load_state_dict(torch.load(file_path, map_location=device))
 
 
 def save_model(model, file_path):

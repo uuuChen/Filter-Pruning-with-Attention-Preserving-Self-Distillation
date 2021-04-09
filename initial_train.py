@@ -1,7 +1,7 @@
 import argparse
 import os
 
-from util import check_dirs_exist, get_device, accuracy, load_model
+from util import check_dirs_exist, get_device, accuracy
 from data_loader import DataLoader
 from models.alexnet import alexnet
 from trainer import Trainer
