@@ -4,7 +4,7 @@ import numpy as np
 from typing import NamedTuple
 from tqdm import tqdm
 from abc import abstractmethod
-from util import get_average_meters
+from util import get_average_meters, load_model, save_model
 import torch
 import torch.nn as nn
 
@@ -22,6 +22,9 @@ class Trainer(object):
 
         self.cur_epoch = None
         self.cur_lr = args.lr
+
+    def _get_save_model_path(self, i):
+        return os.path.join(self.save_dir, f'model_epochs_{i}.pt')
 
     def _train_epoch(self, model, global_step):
         self.model.train()  # train mode
@@ -48,24 +51,24 @@ class Trainer(object):
     def _eval_epoch(self, model):
         self.model.eval()  # evaluation mode
         iter_bar = tqdm(self.eval_data_iter, desc='Iter')
-        epoch_result_vals = None
+        e_result_vals = None
         for i, batch in enumerate(iter_bar, start=1):
             batch = [t.to(self.device) for t in batch]
             with torch.no_grad():  # evaluation without gradient calculation
-                batch_result_dict = self.evaluate(model, batch)  # accuracy to print
-                batch_result_vals = np.array(list(batch_result_dict.values()))
-            if epoch_result_vals is None:
-                epoch_result_vals = [0] * len(batch_result_vals)
-            epoch_result_vals += batch_result_vals
+                b_result_dict = self.evaluate(model, batch)  # accuracy to print
+                b_result_vals = np.array(list(b_result_dict.values()))
+            if e_result_vals is None:
+                e_result_vals = [0] * len(b_result_vals)
+            e_result_vals += b_result_vals
             iter_bar.set_description('Iter')
-        epoch_result_dict = dict(zip(batch_result_dict.keys(), epoch_result_vals/len(iter_bar)))
-        print(epoch_result_dict)
-        return epoch_result_dict
+        e_result_dict = dict(zip(b_result_dict.keys(), e_result_vals/len(iter_bar)))
+        print(e_result_dict)
+        return e_result_dict
 
     def train(self, model_file=None, data_parallel=True):
         """ Train Loop """
         self.model.train()  # train mode
-        self.load(model_file)
+        load_model(self.model, model_file, self.device)
         model = self.model.to(self.device)
         if data_parallel:  # use Data Parallelism with Multi-GPU
             model = nn.DataParallel(model)
@@ -74,30 +77,20 @@ class Trainer(object):
         for epoch in range(self.args.n_epochs):
             self.cur_epoch = epoch
             self._train_epoch(model, global_step)
-            eval_dict = self._eval_epoch(model)
-            if best_top1 < eval_dict['top1']:
-                best_top1 = eval_dict['top1']
-                self.save(epoch)
-        self.save(self.args.n_epochs)
+            eval_result = self._eval_epoch(model)
+            if best_top1 < eval_result['top1']:
+                best_top1 = eval_result['top1']
+                save_model(model, self._get_save_model_path(epoch))
+        save_model(model, self._get_save_model_path(self.args.n_epochs))
 
     def eval(self, model_file=None, data_parallel=True):
         """ Evaluation Loop """
         self.model.eval() # evaluation mode
-        self.load(model_file)
+        load_model(self.model, model_file, self.device)
         model = self.model.to(self.device)
         if data_parallel: # use Data Parallelism with Multi-GPU
             model = nn.DataParallel(model)
         self._eval_epoch(model)
-
-    def load(self, model_file):
-        """ Load saved model or pretrained transformer (a part of model) """
-        print('Loading the model from', model_file)
-        if model_file is not None:
-            self.model.load_state_dict(torch.load(model_file, map_location=self.device), strict=False)
-
-    def save(self, i):
-        """ save current model """
-        torch.save(self.model.state_dict(), os.path.join(self.save_dir, 'model_epochs_' + str(i) + '.pt'))
 
     def adjust_learning_rate(self):
         if self.cur_epoch in self.args.schedule:

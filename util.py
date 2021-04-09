@@ -44,6 +44,17 @@ def accuracy(output, target, topk=(1,)):
     return res
 
 
+def load_model(model, file_path, device='cuda'):
+    print('Loading the model from', file_path)
+    if file_path is not None:
+        model.load_state_dict(torch.load(file_path, map_location=device), strict=False)
+
+
+def save_model(model, file_path):
+    print('Saving the model to', file_path)
+    torch.save(model.state_dict(), file_path)
+
+
 def get_average_meters(n=1):
     return [AverageMeter() for _ in range(n)]
 
