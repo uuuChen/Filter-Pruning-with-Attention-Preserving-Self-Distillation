@@ -56,7 +56,7 @@ class PrunedModelTrainer(Trainer):
     def get_loss_and_backward(self, batch, global_step):
         input_var, target_var = batch
 
-        # Do soft prune per "args.prune_interval"
+        # Prune the weights per "args.prune_interval"
         if self.last_epoch != self.cur_epoch and self.cur_epoch % self.args.prune_interval == 0:
             self.last_epoch = self.cur_epoch
 
@@ -65,16 +65,18 @@ class PrunedModelTrainer(Trainer):
             loss = self.cross_entropy(output_var, target_var)
             loss.backward(retain_graph=True)
 
-            # Soft prune by the "args.prune_mode"
+            # Prune the weights by "args.prune_mode"
             self.model.prune(self.args.prune_mode, self.args.prune_rates)
 
-        # Get actual loss and backward, and then set the gradient of the pruned weights to 0
+        # Get actual loss and backward, then set the gradient of the pruned weights to 0 if it's in the "hard"
+        # prune mode
         output_var = self.model(input_var)
         loss = self.cross_entropy(output_var, target_var)
         loss.backward()
         if 'hard' in self.args.prune_mode:
             self.zeroize_pruned_weights_grad()
 
+        # Get performance metrics
         top1, top5 = accuracy(output_var, target_var, topk=(1, 5))
         self.writer.add_scalars(
             'data/scalar_group', {
@@ -110,9 +112,12 @@ def main():
     base_trainer_cfg = (args, model, train_loader, eval_loader, optimizer, args.save_dir, get_device())
     writer = SummaryWriter(log_dir=args.log_dir)  # for tensorboardX
     trainer = PrunedModelTrainer(writer, *base_trainer_cfg)
-    if args.load_model_path is not None:  # Show loaded model performance
+    if args.load_model_path is not None:  # Show loaded model performance as baseline
         trainer.eval()
     trainer.train()
+    if 'soft' in args.prune_mode:
+        model.prune(args.prune_mode, args.prune_rates)
+    trainer.eval()
 
 
 if __name__ == '__main__':
