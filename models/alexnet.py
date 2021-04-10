@@ -1,5 +1,6 @@
 import torch.nn as nn
 from typing import Any
+from pruner import FilterPruningModule
 import torch.nn.functional as F
 
 __all__ = ['AlexNet', 'alexnet']
@@ -10,7 +11,7 @@ model_urls = {
 }
 
 
-class AlexNet(nn.Module):
+class AlexNet(FilterPruningModule):
     def __init__(self, num_classes=100):
         super(AlexNet, self).__init__()
         self.conv1 = nn.Conv2d(3, 64, kernel_size=(11, 11), stride=4, padding=5)

@@ -12,20 +12,26 @@ import torch.nn as nn
 
 
 parser = argparse.ArgumentParser(description='Prune Process')
-parser.add_argument('--prune-mode', '-pm', default='filter-norm', type=str, metavar='M',
-                    help='1. filter-norm 2. channel-norm 3. filter-gm\n')
-parser.add_argument('--prune-rates', "-pr", nargs='+', type=float, default=[0.16, 0.62, 0.65, 0.63, 0.63],
-                    help='pruning rate for AlexNet conv layer (default=[0.16, 0.62, 0.65, 0.63, 0.63])')
-parser.add_argument('--prune-interval', '-pi', default=1, type=int,
-                    metavar='N', help='prune interval when using prune-mode "filter-gm" (default: 1)')
-parser.add_argument('--prune-retrain-epochs', '-prep', default=200, type=int,
-                    metavar='N',  help='number of pruning retrain epochs to run (default: 200)')
-parser.add_argument('--prune-retrain-lr', '-prlr', default=0.0001, type=float,
-                    metavar='PRLR', help='pruning retrain learning rate')
-parser.add_argument('--model-file',  default="saves/alexnet_cifar100/model_epochs_30.pt", type=str)
+parser.add_argument('--n_epochs', default=200, type=int)
+parser.add_argument('--batch_size', type=int, default=256)
+parser.add_argument('--lr', type=float, default=0.1)
+parser.add_argument('--lr_drop', type=float, default=0.1)
+parser.add_argument('--seed', type=int, default=111)
+parser.add_argument('--model', type=str, default='alexnet')
+parser.add_argument('--dataset', type=str, default='cifar100')
+parser.add_argument('--schedule', type=int, nargs='+', default=[50, 100, 150])
+parser.add_argument('--momentum', default=0.9, type=float)
+parser.add_argument('--weight_decay', default=5e-4, type=float)
+parser.add_argument('--prune-mode', type=str, default='filter-ga')
+parser.add_argument('--prune-rates', nargs='+', type=float, default=[0.16, 0.62, 0.65, 0.63, 0.63])
+parser.add_argument('--prune-interval', type=int, default=1)
+parser.add_argument('--prune-retrain-epochs', type=int, default=200)
+parser.add_argument('--prune-retrain-lr', '-prlr', type=float, default=0.0001)
+parser.add_argument('--model-file', type=str)
 args = parser.parse_args()
 
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'  # For Mac OS
+args.save_dir = f'saves/{args.model}_{args.dataset}/prune'
 args.log_dir = os.path.join(args.save_dir, 'log')
 
 
@@ -34,10 +40,25 @@ class PrunedModelTrainer(Trainer):
         super().__init__(*args, **kwargs)
         self.writer = writer
         self.cross_entropy = nn.CrossEntropyLoss()
+        self.filter_prune_rates = self.model.get_filters_prune_rates(self.args.prune_rates)
+        self.last_epoch = None
 
-    def get_loss(self, model, batch, global_step):
+    def get_loss(self, batch, global_step):
         input_var, target_var = batch
-        output_var = model(input_var)
+
+        if self.last_epoch != self.cur_epoch:  # Do soft prune in every epoch
+            self.last_epoch = self.cur_epoch
+
+            # In order to get the gradient and use it on the criterion "filter-ga"
+            output_var = self.model(input_var)
+            loss = self.cross_entropy(output_var, target_var)
+            loss.backward(retain_graph=True)
+
+            # Soft prune by the criterion "filter-ga"
+            self.model.prune(args.prune_mode, args.prune_rates)
+
+        # Evaluate
+        output_var = self.model(input_var)
         loss = self.cross_entropy(output_var, target_var)
         top1, top5 = accuracy(output_var, target_var, topk=(1, 5))
         self.writer.add_scalars(
@@ -53,9 +74,9 @@ class PrunedModelTrainer(Trainer):
               f'Top5: {top5:.3f}')
         return loss.mean(), top1.mean(), top5.mean()
 
-    def evaluate(self, model, batch):
+    def evaluate(self, batch):
         input_var, target_var = batch
-        output_var = model(input_var)
+        output_var = self.model(input_var)
         loss = self.cross_entropy(output_var, target_var)
         top1, top5 = accuracy(output_var, target_var, topk=(1, 5))
         return {'loss': loss, 'top1': top1, 'top5': top5}
@@ -70,7 +91,7 @@ def main():
         raise ValueError
     if args.model == 'alexnet':
         model = alexnet(num_classes=num_classes)
-        load_model(model, 'saves/alexnet_cifar100/model_epochs_0.pt', get_device())
+        load_model(model, 'saves/alexnet_cifar100/initial_train/model_epochs_0.pt', get_device())
     else:
         raise ValueError
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)

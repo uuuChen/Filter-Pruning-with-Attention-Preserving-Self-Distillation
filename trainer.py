@@ -36,7 +36,7 @@ class Trainer(object):
             batch = [t.to(self.device) for t in batch]
 
             self.optimizer.zero_grad()
-            b_loss, b_top1, b_top5 = self.get_loss(model, batch, global_step)
+            b_loss, b_top1, b_top5 = self.get_loss(batch, global_step)
             b_loss.backward()
             self.optimizer.step()
 
@@ -98,9 +98,9 @@ class Trainer(object):
                 param_group['lr'] = self.cur_lr
 
     @abstractmethod
-    def get_loss(self, model, batch, global_step):
+    def get_loss(self, batch, global_step):
         return NotImplementedError
 
     @abstractmethod
-    def evaluate(self, model, batch):
+    def evaluate(self, batch):
         return NotImplementedError

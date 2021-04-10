@@ -17,7 +17,6 @@ parser.add_argument('--batch_size', type=int, default=256)
 parser.add_argument('--lr', type=float, default=0.1)
 parser.add_argument('--lr_drop', type=float, default=0.1)
 parser.add_argument('--seed', type=int, default=111)
-parser.add_argument('--save_dir', type=str, default='saves/default')
 parser.add_argument('--model', type=str, default='alexnet')
 parser.add_argument('--dataset', type=str, default='cifar100')
 parser.add_argument('--schedule', type=int, nargs='+', default=[50, 100, 150])
@@ -26,7 +25,8 @@ parser.add_argument('--weight_decay', default=5e-4, type=float)
 args = parser.parse_args()
 
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'  # For Mac OS
-args.log_dir = os.path.join(args.save_dir, 'log')
+args.save_dir = f'saves/{args.model}_{args.dataset}/initial_train'
+args.log_dir = f'{args.save_dir}/log'
 
 
 class InitialModelTrainer(Trainer):
@@ -35,9 +35,9 @@ class InitialModelTrainer(Trainer):
         self.writer = writer
         self.cross_entropy = nn.CrossEntropyLoss()
 
-    def get_loss(self, model, batch, global_step):
+    def get_loss(self, batch, global_step):
         input_var, target_var = batch
-        output_var = model(input_var)
+        output_var = self.model(input_var)
         loss = self.cross_entropy(output_var, target_var)
         top1, top5 = accuracy(output_var, target_var, topk=(1, 5))
         self.writer.add_scalars(
@@ -50,9 +50,9 @@ class InitialModelTrainer(Trainer):
         )
         return loss.mean(), top1.mean(), top5.mean()
 
-    def evaluate(self, model, batch):
+    def evaluate(self, batch):
         input_var, target_var = batch
-        output_var = model(input_var)
+        output_var = self.model(input_var)
         loss = self.cross_entropy(output_var, target_var)
         top1, top5 = accuracy(output_var, target_var, topk=(1, 5))
         return {'loss': loss, 'top1': top1, 'top5': top5}
