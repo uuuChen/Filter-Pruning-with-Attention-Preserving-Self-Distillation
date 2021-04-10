@@ -76,8 +76,8 @@ class Trainer(object):
             eval_result = self._eval_epoch()
             if best_top1 < eval_result['top1']:
                 best_top1 = eval_result['top1']
-                save_model(self.model.module, self._get_save_model_path(epoch))
-        save_model(self.model.module, self._get_save_model_path(self.args.n_epochs))
+                save_model(self.model, self._get_save_model_path(epoch))
+        save_model(self.model, self._get_save_model_path(self.args.n_epochs))
 
     def eval(self, model_file=None):
         """ Evaluation Loop """

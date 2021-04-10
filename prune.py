@@ -71,9 +71,6 @@ class PrunedModelTrainer(Trainer):
                 'top5': top5
             }, global_step
         )
-        print(f'\tLoss: {loss.item():.3f}\t'
-              f'Top1: {top1:.3f}\t'
-              f'Top5: {top5:.3f}')
         return loss.mean(), top1.mean(), top5.mean()
 
     def evaluate(self, batch):
