@@ -1,12 +1,10 @@
 import os
 import json
 import numpy as np
-from typing import NamedTuple
 from tqdm import tqdm
 from abc import abstractmethod
-from util import get_average_meters, load_model, save_model
+from util import get_average_meters, save_model
 import torch
-import torch.nn as nn
 
 
 class Trainer(object):
@@ -79,10 +77,9 @@ class Trainer(object):
                 save_model(self.model, self._get_save_model_path(epoch))
         save_model(self.model, self._get_save_model_path(self.args.n_epochs))
 
-    def eval(self, model_file=None):
+    def eval(self):
         """ Evaluation Loop """
         self.model.eval() # evaluation mode
-        load_model(self.model, model_file, self.device)
         self.model = self.model.to(self.device)
         self._eval_epoch()
 
