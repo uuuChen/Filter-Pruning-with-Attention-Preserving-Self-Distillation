@@ -17,7 +17,7 @@ import torch.nn as nn
 parser = argparse.ArgumentParser(description='Prune Process')
 parser.add_argument('--n_epochs', type=int, default=200)
 parser.add_argument('--batch_size', type=int, default=256)
-parser.add_argument('--lr', type=float, default=0.1)
+parser.add_argument('--lr', type=float, default=0.01)
 parser.add_argument('--lr_drop', type=float, default=0.1)
 parser.add_argument('--seed', type=int, default=111)
 parser.add_argument('--model', type=str, default='alexnet')
@@ -34,7 +34,8 @@ parser.add_argument('--load-model-path', type=str)
 args = parser.parse_args()
 
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'  # For Mac OS
-args.save_dir = f'saves/{args.model}_{args.dataset}/prune'
+args.save_dir = f'saves/{args.model}_{args.dataset}/{args.prune_mode}'
+args.save_dir += '-once' if args.prune_interval == sys.maxsize else f'-{args.prune_interval}'
 args.log_dir = os.path.join(args.save_dir, 'log')
 
 
