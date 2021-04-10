@@ -1,2 +1,3 @@
 #!/usr/bin/env bash
-python3 initial_train.py --model alexnet --dataset cifar100 --n_epochs 200 --schedule 50 100 150 --lr_drop 0.1
+python3 prune.py --load-model-path saves/alexnet_cifar100/initial_train/model_epochs_0.pt
+

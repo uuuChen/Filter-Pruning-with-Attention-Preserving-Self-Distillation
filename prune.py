@@ -1,5 +1,6 @@
 import argparse
 import os
+import sys
 
 from util import check_dirs_exist, get_device, accuracy, load_model, save_model
 from data_loader import DataLoader
@@ -12,7 +13,7 @@ import torch.nn as nn
 
 
 parser = argparse.ArgumentParser(description='Prune Process')
-parser.add_argument('--n_epochs', default=200, type=int)
+parser.add_argument('--n_epochs', type=int, default=200)
 parser.add_argument('--batch_size', type=int, default=256)
 parser.add_argument('--lr', type=float, default=0.1)
 parser.add_argument('--lr_drop', type=float, default=0.1)
@@ -20,14 +21,14 @@ parser.add_argument('--seed', type=int, default=111)
 parser.add_argument('--model', type=str, default='alexnet')
 parser.add_argument('--dataset', type=str, default='cifar100')
 parser.add_argument('--schedule', type=int, nargs='+', default=[50, 100, 150])
-parser.add_argument('--momentum', default=0.9, type=float)
-parser.add_argument('--weight_decay', default=5e-4, type=float)
+parser.add_argument('--momentum', type=float, default=0.9)
+parser.add_argument('--weight_decay', type=float, default=5e-4)
 parser.add_argument('--prune-mode', type=str, default='filter-ga')
 parser.add_argument('--prune-rates', nargs='+', type=float, default=[0.16, 0.62, 0.65, 0.63, 0.63])
-parser.add_argument('--prune-interval', type=int, default=1)
+parser.add_argument('--prune-interval', type=int, default=sys.maxsize)  # By default we will only prune once
 parser.add_argument('--prune-retrain-epochs', type=int, default=200)
-parser.add_argument('--prune-retrain-lr', '-prlr', type=float, default=0.0001)
-parser.add_argument('--model-file', type=str)
+parser.add_argument('--prune-retrain-lr', type=float, default=0.0001)
+parser.add_argument('--load-model-path', type=str)
 args = parser.parse_args()
 
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'  # For Mac OS
@@ -46,7 +47,8 @@ class PrunedModelTrainer(Trainer):
     def get_loss(self, batch, global_step):
         input_var, target_var = batch
 
-        if self.last_epoch != self.cur_epoch:  # Do soft prune in every epoch
+        # Do soft prune per "args.prune_interval"
+        if self.last_epoch != self.cur_epoch and self.cur_epoch % self.args.prune_interval == 0:
             self.last_epoch = self.cur_epoch
 
             # In order to get the gradient and use it on the criterion "filter-ga"
@@ -91,7 +93,7 @@ def main():
         raise ValueError
     if args.model == 'alexnet':
         model = alexnet(num_classes=num_classes)
-        load_model(model, 'saves/alexnet_cifar100/initial_train/model_epochs_0.pt', get_device())
+        load_model(model, args.load_model_path, get_device())
     else:
         raise ValueError
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)

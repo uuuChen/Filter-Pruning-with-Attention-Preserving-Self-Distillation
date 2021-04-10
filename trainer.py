@@ -26,9 +26,8 @@ class Trainer(object):
     def _get_save_model_path(self, i):
         return os.path.join(self.save_dir, f'model_epochs_{i}.pt')
 
-    def _train_epoch(self, model, global_step):
+    def _train_epoch(self, global_step):
         self.model.train()  # train mode
-        # loss_sum = 0.  # the sum of iteration losses to get average loss in every epoch
         e_loss, e_top1, e_top5 = get_average_meters(n=3)
         iter_bar = tqdm(self.train_data_iter)
         self.adjust_learning_rate()
@@ -48,14 +47,14 @@ class Trainer(object):
                 f'Iter (loss={e_loss.mean:5.3f} | top1={e_top1.mean:5.3} | top5={e_top5.mean:5.3})'
             )
 
-    def _eval_epoch(self, model):
+    def _eval_epoch(self):
         self.model.eval()  # evaluation mode
         iter_bar = tqdm(self.eval_data_iter, desc='Iter')
         e_result_vals = None
         for i, batch in enumerate(iter_bar, start=1):
             batch = [t.to(self.device) for t in batch]
             with torch.no_grad():  # evaluation without gradient calculation
-                b_result_dict = self.evaluate(model, batch)  # accuracy to print
+                b_result_dict = self.evaluate(batch)  # accuracy to print
                 b_result_vals = np.array(list(b_result_dict.values()))
             if e_result_vals is None:
                 e_result_vals = [0] * len(b_result_vals)
@@ -65,31 +64,27 @@ class Trainer(object):
         print(e_result_dict)
         return e_result_dict
 
-    def train(self, data_parallel=True):
+    def train(self):
         """ Train Loop """
         self.model.train()  # train mode
-        model = self.model.to(self.device)
-        if data_parallel:  # use Data Parallelism with Multi-GPU
-            model = nn.DataParallel(model)
+        self.model = self.model.to(self.device)
         global_step = 0  # global iteration steps regardless of epochs
         best_top1 = 0.
         for epoch in range(self.args.n_epochs):
             self.cur_epoch = epoch
-            self._train_epoch(model, global_step)
-            eval_result = self._eval_epoch(model)
+            self._train_epoch(global_step)
+            eval_result = self._eval_epoch()
             if best_top1 < eval_result['top1']:
                 best_top1 = eval_result['top1']
-                save_model(model.module, self._get_save_model_path(epoch))
-        save_model(model.module, self._get_save_model_path(self.args.n_epochs))
+                save_model(self.model.module, self._get_save_model_path(epoch))
+        save_model(self.model.module, self._get_save_model_path(self.args.n_epochs))
 
-    def eval(self, model_file=None, data_parallel=True):
+    def eval(self, model_file=None):
         """ Evaluation Loop """
         self.model.eval() # evaluation mode
         load_model(self.model, model_file, self.device)
-        model = self.model.to(self.device)
-        if data_parallel: # use Data Parallelism with Multi-GPU
-            model = nn.DataParallel(model)
-        self._eval_epoch(model)
+        self.model = self.model.to(self.device)
+        self._eval_epoch()
 
     def adjust_learning_rate(self):
         if self.cur_epoch in self.args.schedule:
