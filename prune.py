@@ -97,6 +97,8 @@ def main():
     base_trainer_cfg = (args, model, train_loader, eval_loader, optimizer, args.save_dir, get_device())
     writer = SummaryWriter(log_dir=args.log_dir)  # for tensorboardX
     trainer = PrunedModelTrainer(writer, *base_trainer_cfg)
+    if args.load_model_path is not None:  # Show loaded model performance
+        trainer.eval()
     trainer.train()
 
 
