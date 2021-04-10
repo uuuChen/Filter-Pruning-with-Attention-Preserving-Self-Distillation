@@ -15,18 +15,18 @@ class FilterPruningModule(Module):
         filters_grad = conv_module.weight.grad.cpu().numpy()
         sum_of_objects = None
         object_nums = None
-        if mode == 'filter-norm':
+        if 'filter-norm' in mode:
             sum_of_objects = np.sum(np.abs(filters_weight.reshape(filters_weight.shape[0], -1)), 1)
             object_nums = filters_weight.shape[0]
-        elif mode == 'channel-norm':
+        elif 'channel-norm' in mode:
             perm_conv_arr = np.transpose(filters_weight, (1, 0, 2, 3))  # (fn, cn, kh, kw) => (cn, fn, kh, kw)
             sum_of_objects = np.sum(np.abs(perm_conv_arr.reshape(perm_conv_arr.shape[0], -1)), 1)
             object_nums = filters_weight.shape[1]
-        elif mode == 'filter-gm':
+        elif 'filter-gm' in mode:
             filters_flat_arr = filters_weight.reshape(filters_weight.shape[0], -1)
             sum_of_objects = np.array([np.sum(np.power(filters_flat_arr - arr, 2)) for arr in filters_flat_arr])
             object_nums = filters_weight.shape[0]
-        elif mode == 'filter-ga':  # Combine gradient-base and activation-base
+        elif 'filter-ga' in mode:  # Combine gradient-base and activation-base
             filters_flat_arr = filters_weight.reshape(filters_weight.shape[0], -1)
             grad_flat_arr = filters_grad.reshape(filters_grad.shape[0], -1)
             sum_of_objects = np.sum(np.abs(filters_flat_arr) * np.abs(grad_flat_arr), 1)
@@ -87,7 +87,7 @@ class FilterPruningModule(Module):
                     self._prune_by_indices(module, 0, prune_indices)
 
     def prune(self, mode, prune_rates):
-        if mode == 'percentile':
+        if 'percentile' in mode:
             self._prune_by_percentile(prune_rates)
         elif 'filter' in mode:
             prune_rates = self.get_filters_prune_rates(prune_rates)

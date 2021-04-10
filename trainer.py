@@ -33,8 +33,7 @@ class Trainer(object):
             batch = [t.to(self.device) for t in batch]
 
             self.optimizer.zero_grad()
-            b_loss, b_top1, b_top5 = self.get_loss(batch, global_step)
-            b_loss.backward()
+            b_loss, b_top1, b_top5 = self.get_loss_and_backward(batch, global_step)
             self.optimizer.step()
 
             global_step += 1
@@ -61,6 +60,14 @@ class Trainer(object):
         e_result_dict = dict(zip(b_result_dict.keys(), e_result_vals/len(iter_bar)))
         print(e_result_dict)
         return e_result_dict
+
+    @abstractmethod
+    def get_loss_and_backward(self, batch, global_step):
+        return NotImplementedError
+
+    @abstractmethod
+    def evaluate(self, batch):
+        return NotImplementedError
 
     def train(self):
         """ Train Loop """
@@ -89,10 +96,4 @@ class Trainer(object):
             for param_group in self.optimizer.param_groups:
                 param_group['lr'] = self.cur_lr
 
-    @abstractmethod
-    def get_loss(self, batch, global_step):
-        return NotImplementedError
 
-    @abstractmethod
-    def evaluate(self, batch):
-        return NotImplementedError

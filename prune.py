@@ -1,13 +1,15 @@
 import argparse
 import os
 import sys
+import numpy as np
 
-from util import check_dirs_exist, get_device, accuracy, load_model, save_model
+from util import check_dirs_exist, get_device, accuracy, load_model, save_model, print_nonzeros
 from data_loader import DataLoader
 from models.alexnet import alexnet
 from trainer import Trainer
 
 from tensorboardX import SummaryWriter
+import torch
 import torch.optim as optim
 import torch.nn as nn
 
@@ -23,7 +25,7 @@ parser.add_argument('--dataset', type=str, default='cifar100')
 parser.add_argument('--schedule', type=int, nargs='+', default=[50, 100, 150])
 parser.add_argument('--momentum', type=float, default=0.9)
 parser.add_argument('--weight_decay', type=float, default=5e-4)
-parser.add_argument('--prune-mode', type=str, default='filter-ga')
+parser.add_argument('--prune-mode', type=str, default='hard-filter-ga')
 parser.add_argument('--prune-rates', nargs='+', type=float, default=[0.16, 0.62, 0.65, 0.63, 0.63])
 parser.add_argument('--prune-interval', type=int, default=sys.maxsize)  # By default we will only prune once
 parser.add_argument('--prune-retrain-epochs', type=int, default=200)
@@ -44,7 +46,14 @@ class PrunedModelTrainer(Trainer):
         self.filter_prune_rates = self.model.get_filters_prune_rates(self.args.prune_rates)
         self.last_epoch = None
 
-    def get_loss(self, batch, global_step):
+    def zeroize_pruned_weights_grad(self):
+        for name, p in self.model.named_parameters():
+            tensor_arr = p.data.cpu().numpy()
+            ori_grad_arr = p.grad.data.cpu().numpy()
+            new_grad_arr = np.where(tensor_arr == 0, 0, ori_grad_arr)
+            p.grad.data = torch.from_numpy(new_grad_arr).to(self.device)
+
+    def get_loss_and_backward(self, batch, global_step):
         input_var, target_var = batch
 
         # Do soft prune per "args.prune_interval"
@@ -56,12 +65,16 @@ class PrunedModelTrainer(Trainer):
             loss = self.cross_entropy(output_var, target_var)
             loss.backward(retain_graph=True)
 
-            # Soft prune by the criterion "filter-ga"
-            self.model.prune(args.prune_mode, args.prune_rates)
+            # Soft prune by the "args.prune_mode"
+            self.model.prune(self.args.prune_mode, self.args.prune_rates)
 
-        # Evaluate
+        # Get actual loss and backward, and then set the gradient of the pruned weights to 0
         output_var = self.model(input_var)
         loss = self.cross_entropy(output_var, target_var)
+        loss.backward()
+        if 'hard' in self.args.prune_mode:
+            self.zeroize_pruned_weights_grad()
+
         top1, top5 = accuracy(output_var, target_var, topk=(1, 5))
         self.writer.add_scalars(
             'data/scalar_group', {
@@ -71,7 +84,7 @@ class PrunedModelTrainer(Trainer):
                 'top5': top5
             }, global_step
         )
-        return loss.mean(), top1.mean(), top5.mean()
+        return loss, top1, top5
 
     def evaluate(self, batch):
         input_var, target_var = batch

@@ -35,10 +35,11 @@ class InitialModelTrainer(Trainer):
         self.writer = writer
         self.cross_entropy = nn.CrossEntropyLoss()
 
-    def get_loss(self, batch, global_step):
+    def get_loss_and_backward(self, batch, global_step):
         input_var, target_var = batch
         output_var = self.model(input_var)
         loss = self.cross_entropy(output_var, target_var)
+        loss.backward()
         top1, top5 = accuracy(output_var, target_var, topk=(1, 5))
         self.writer.add_scalars(
             'data/scalar_group', {
@@ -48,7 +49,7 @@ class InitialModelTrainer(Trainer):
                 'top5': top5
             }, global_step
         )
-        return loss.mean(), top1.mean(), top5.mean()
+        return loss, top1, top5
 
     def evaluate(self, batch):
         input_var, target_var = batch
