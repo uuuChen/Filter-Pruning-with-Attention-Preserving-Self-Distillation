@@ -3,7 +3,7 @@ import os
 import sys
 import numpy as np
 
-from util import check_dirs_exist, get_device, accuracy, load_model, save_model, print_nonzeros
+from util import check_dirs_exist, get_device, accuracy, load_model, save_model, print_nonzeros, set_seeds
 from data_loader import DataLoader
 from models.alexnet import alexnet
 from trainer import Trainer
@@ -98,6 +98,7 @@ class PrunedModelTrainer(Trainer):
 
 
 def main():
+    set_seeds(args.seed)
     check_dirs_exist([args.save_dir])
     if args.dataset == 'cifar100':
         train_loader, eval_loader = DataLoader.get_cifar100(args.batch_size)  # get data loader

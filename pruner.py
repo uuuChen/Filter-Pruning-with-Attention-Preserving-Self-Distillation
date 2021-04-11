@@ -92,7 +92,7 @@ class FilterPruningModule(Module):
         elif 'filter' in mode:
             prune_rates = self.get_filters_prune_rates(prune_rates)
             self._prune_filters_or_channels(prune_rates, mode=mode)
-            self.set_indices_dict_after_pruning()
+            self.set_indices_dicts_after_pruning()
 
     def get_filters_prune_rates(self, ideal_prune_rates, mode='filter', print_log=False):
         """ Suppose the model prunes some filters (filters, :, :, :) or channels (:, channels, :, :). """
@@ -144,7 +144,7 @@ class FilterPruningModule(Module):
 
         return new_pruning_rates
 
-    def set_indices_dict_after_pruning(self):
+    def set_indices_dicts_after_pruning(self):
         for name, module in self.named_modules():
             if isinstance(module, torch.nn.Conv2d):
                 conv_arr = module.weight.data.cpu().numpy()
