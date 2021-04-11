@@ -40,12 +40,16 @@ args.save_dir += '-once' if args.prune_interval == sys.maxsize else f'-{args.pru
 args.log_dir = os.path.join(args.save_dir, 'log')
 
 
-class PrunedModelTrainer(Trainer):
+class GDAPModelTrainer(Trainer):
+    """  A trainer for gradually distillation with attention and pruning """
     def __init__(self, writer, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.writer = writer
         self.cross_entropy = nn.CrossEntropyLoss()
+
         self.filter_prune_rates = self.model.get_filters_prune_rates(self.args.prune_rates)
+        self.model_with_FE = FeatureExtractor(self.model)
+
         self.last_epoch = None
 
     def zeroize_pruned_weights_grad(self):
@@ -63,7 +67,7 @@ class PrunedModelTrainer(Trainer):
             self.last_epoch = self.cur_epoch
 
             # In order to get the gradient and use it on the criterion "filter-ga"
-            output_var, _ = self.model(input_var)
+            output_var = self.model(input_var)
             loss = self.cross_entropy(output_var, target_var)
             loss.backward(retain_graph=True)
 
@@ -72,7 +76,7 @@ class PrunedModelTrainer(Trainer):
 
         # Get actual loss and backward, then set the gradient of the pruned weights to 0 if it's in the "hard"
         # prune mode
-        output_var, features = self.model(input_var)
+        output_var, features = self.model_with_FE(input_var)
         loss = self.cross_entropy(output_var, target_var)
         loss.backward()
         if 'hard' in self.args.prune_mode:
@@ -92,7 +96,7 @@ class PrunedModelTrainer(Trainer):
 
     def evaluate(self, batch):
         input_var, target_var = batch
-        output_var, _ = self.model(input_var)
+        output_var = self.model(input_var)
         loss = self.cross_entropy(output_var, target_var)
         top1, top5 = accuracy(output_var, target_var, topk=(1, 5))
         return {'loss': loss, 'top1': top1, 'top5': top5}
@@ -111,13 +115,12 @@ def main():
         load_model(model, args.load_model_path, get_device())
     else:
         raise ValueError
-    model = FeatureExtractor(model)
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
     base_trainer_cfg = (args, model, train_loader, eval_loader, optimizer, args.save_dir, get_device())
     writer = SummaryWriter(log_dir=args.log_dir)  # for tensorboardX
-    trainer = PrunedModelTrainer(writer, *base_trainer_cfg)
-    # if args.load_model_path is not None:  # Show loaded model performance as baseline
-    #     trainer.eval()
+    trainer = GDAPModelTrainer(writer, *base_trainer_cfg)
+    if args.load_model_path is not None:  # Show loaded model performance as baseline
+        trainer.eval()
     trainer.train()
     if 'soft' in args.prune_mode:
         model.prune(args.prune_mode, args.prune_rates)
