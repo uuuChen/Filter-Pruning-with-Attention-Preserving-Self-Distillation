@@ -12,6 +12,7 @@ from trainer import Trainer
 from tensorboardX import SummaryWriter
 import torch
 import torch.optim as optim
+import torch.nn.functional as F
 import torch.nn as nn
 
 
@@ -29,35 +30,70 @@ parser.add_argument('--weight_decay', type=float, default=5e-4)
 parser.add_argument('--prune-mode', type=str, default='hard-filter-ga')
 parser.add_argument('--prune-rates', nargs='+', type=float, default=[0.16, 0.62, 0.65, 0.63, 0.63])
 parser.add_argument('--prune-interval', type=int, default=sys.maxsize)  # By default we will only prune once
-parser.add_argument('--prune-retrain-epochs', type=int, default=200)
-parser.add_argument('--prune-retrain-lr', type=float, default=0.0001)
-parser.add_argument('--load-model-path', type=str)
+parser.add_argument('--distill-mode', type=str, default='all')  # mode: {'conv', 'fc', 'all'}
+parser.add_argument('--t-load-model-path', type=str, default=None)
+parser.add_argument('--s-load-model-path', type=str, default=None)
+parser.add_argument('--adapt-hidden-size', type=int, default=128)
 args = parser.parse_args()
 
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'  # For Mac OS
 args.save_dir = f'saves/{args.model}_{args.dataset}/{args.prune_mode}'
 args.save_dir += '-once' if args.prune_interval == sys.maxsize else f'-{args.prune_interval}'
 args.log_dir = os.path.join(args.save_dir, 'log')
+if args.t_load_model_path is None:
+    args.t_load_model_path = args.s_load_model_path
 
 
 class GDAPModelTrainer(Trainer):
-    """  A trainer for gradually distillation with attention and pruning """
-    def __init__(self, writer, *args, **kwargs):
+    """  A trainer for gradually self-distillation combined with attention mechanism and hard or soft pruning. """
+    def __init__(self, t_model, adapt_hidden_size, writer, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.t_model = t_model
+        self.s_model = self.model
+        self.adapt_hidden_size = adapt_hidden_size
         self.writer = writer
-        self.cross_entropy = nn.CrossEntropyLoss()
 
-        self.filter_prune_rates = self.model.get_filters_prune_rates(self.args.prune_rates)
-        self.model_with_FE = FeatureExtractor(self.model)
+        self.cross_entropy = nn.CrossEntropyLoss()
+        self.filter_prune_rates = self.s_model.get_filters_prune_rates(self.args.prune_rates)
+        self.t_model_with_FE = FeatureExtractor(self.t_model)
+        self.s_model_with_FE = FeatureExtractor(self.s_model)
 
         self.last_epoch = None
+        self.init_adapt_layers = False
 
     def zeroize_pruned_weights_grad(self):
-        for name, p in self.model.named_parameters():
+        for p in self.s_model.parameters():
             tensor_arr = p.data.cpu().numpy()
             ori_grad_arr = p.grad.data.cpu().numpy()
             new_grad_arr = np.where(tensor_arr == 0, 0, ori_grad_arr)
             p.grad.data = torch.from_numpy(new_grad_arr).to(self.device)
+
+    def trans_features_for_distill(self, features_dict):
+        dist_features = list()
+        for name, feature in features_dict.items():
+            if 'conv' in name and 'fc' not in self.args.distill_mode:
+                dist_features.append(F.normalize(torch.sum(torch.pow(feature, 2), dim=1)).view(feature.shape[0], -1))
+            elif 'fc' in name and 'conv' not in self.args.distill_mode:
+                dist_features.append(feature)
+        return dist_features
+
+    def build_adapt_layers_for_atten(self, s_model, features):
+        # We only need to use the shape of the features, so we don't need to pass student's and teacher's features to
+        # this function at the same time
+        adapt_layers = list()
+        for feature in features:
+            adapt_layers.append(nn.Linear(feature.shape[1], self.args.adapt_hidden_size))
+        s_model.adapt_layers = nn.ModuleList(adapt_layers)
+        s_model.adapt_layers.to(self.device)
+        self.optimizer = optim.SGD(
+            self.s_model.parameters(),
+            lr=self.args.lr,
+            momentum=self.args.momentum,
+            weight_decay=self.args.weight_decay
+        )
+
+    def get_GAD_loss(self, s_features, t_features):
+        pass
 
     def get_loss_and_backward(self, batch, global_step):
         input_var, target_var = batch
@@ -67,36 +103,49 @@ class GDAPModelTrainer(Trainer):
             self.last_epoch = self.cur_epoch
 
             # In order to get the gradient and use it on the criterion "filter-ga"
-            output_var = self.model(input_var)
-            loss = self.cross_entropy(output_var, target_var)
-            loss.backward(retain_graph=True)
+            s_output_var = self.s_model(input_var)
+            s_loss = self.cross_entropy(s_output_var, target_var)
+            s_loss.backward(retain_graph=True)
 
             # Prune the weights by "args.prune_mode"
-            self.model.prune(self.args.prune_mode, self.args.prune_rates)
+            self.s_model.prune(self.args.prune_mode, self.args.prune_rates)
 
-        # Get actual loss and backward, then set the gradient of the pruned weights to 0 if it's in the "hard"
-        # prune mode
-        output_var, features = self.model_with_FE(input_var)
-        loss = self.cross_entropy(output_var, target_var)
-        loss.backward()
+        # ---------------------------------------------
+        # 1. Do the gradually self-distillation combined with attention mechanism
+        # 2. Get loss and do backward, and then set the gradient of the pruned weights to 0 if it's in the "hard"
+        #    prune mode
+        # ---------------------------------------------
+        t_output_var, t_features_dict = self.t_model_with_FE(input_var)
+        s_output_var, s_features_dict = self.s_model_with_FE(input_var)
+        t_d_features = self.trans_features_for_distill(t_features_dict)
+        s_d_features = self.trans_features_for_distill(s_features_dict)
+        if not self.init_adapt_layers:
+            self.init_adapt_layers = True
+            self.build_adapt_layers_for_atten(self.s_model, s_d_features)
+        pred_loss = self.cross_entropy(s_output_var, target_var)
+        GAD_loss = self.get_GAD_loss(s_d_features, t_d_features)
+        total_loss = pred_loss + GAD_loss
+        total_loss.backward()
         if 'hard' in self.args.prune_mode:
             self.zeroize_pruned_weights_grad()
 
         # Get performance metrics
-        top1, top5 = accuracy(output_var, target_var, topk=(1, 5))
+        top1, top5 = accuracy(s_output_var, target_var, topk=(1, 5))
         self.writer.add_scalars(
             'data/scalar_group', {
-                'total_loss': loss.item(),
+                'total_loss': total_loss.item(),
+                'pred_loss': pred_loss.item(),
+                'gad_loss': GAD_loss.item(),
                 'lr': self.cur_lr,
                 'top1': top1,
                 'top5': top5
             }, global_step
         )
-        return loss, top1, top5
+        return total_loss, top1, top5
 
     def evaluate(self, batch):
         input_var, target_var = batch
-        output_var = self.model(input_var)
+        output_var = self.s_model(input_var)
         loss = self.cross_entropy(output_var, target_var)
         top1, top5 = accuracy(output_var, target_var, topk=(1, 5))
         return {'loss': loss, 'top1': top1, 'top5': top5}
@@ -111,19 +160,20 @@ def main():
     else:
         raise ValueError
     if args.model == 'alexnet':
-        model = alexnet(num_classes=num_classes)
-        load_model(model, args.load_model_path, get_device())
+        t_model = alexnet(num_classes=num_classes)
+        s_model = alexnet(num_classes=num_classes)
+        load_model(t_model, args.t_load_model_path, get_device())
+        load_model(s_model, args.s_load_model_path, get_device())
     else:
         raise ValueError
-    optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
-    base_trainer_cfg = (args, model, train_loader, eval_loader, optimizer, args.save_dir, get_device())
+    optimizer = optim.SGD(s_model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
+    base_trainer_cfg = (args, s_model, train_loader, eval_loader, optimizer, args.save_dir, get_device())
     writer = SummaryWriter(log_dir=args.log_dir)  # for tensorboardX
-    trainer = GDAPModelTrainer(writer, *base_trainer_cfg)
-    if args.load_model_path is not None:  # Show loaded model performance as baseline
-        trainer.eval()
+    trainer = GDAPModelTrainer(t_model, args.adapt_hidden_size, writer, *base_trainer_cfg)
+    trainer.eval()  # Show loaded model performance as baseline
     trainer.train()
     if 'soft' in args.prune_mode:
-        model.prune(args.prune_mode, args.prune_rates)
+        s_model.prune(args.prune_mode, args.prune_rates)
     trainer.eval()
 
 
