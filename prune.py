@@ -30,7 +30,7 @@ parser.add_argument('--weight_decay', type=float, default=5e-4)
 parser.add_argument('--prune-mode', type=str, default='hard-filter-ga')
 parser.add_argument('--prune-rates', nargs='+', type=float, default=[0.16, 0.62, 0.65, 0.63, 0.63])
 parser.add_argument('--prune-interval', type=int, default=sys.maxsize)  # By default we will only prune once
-parser.add_argument('--distill-mode', type=str, default='all')  # mode: {'conv', 'fc', 'all'}
+parser.add_argument('--dist-mode', type=str, default='all')  # mode: {'conv', 'fc', 'all'}
 parser.add_argument('--t-load-model-path', type=str, default=None)
 parser.add_argument('--s-load-model-path', type=str, default=None)
 parser.add_argument('--adapt-hidden-size', type=int, default=128)
@@ -44,7 +44,7 @@ if args.t_load_model_path is None:
     args.t_load_model_path = args.s_load_model_path
 
 
-class GDAPModelTrainer(Trainer):
+class PGADModelTrainer(Trainer):
     """  A trainer for gradually self-distillation combined with attention mechanism and hard or soft pruning. """
     def __init__(self, t_model, adapt_hidden_size, writer, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -68,20 +68,23 @@ class GDAPModelTrainer(Trainer):
             new_grad_arr = np.where(tensor_arr == 0, 0, ori_grad_arr)
             p.grad.data = torch.from_numpy(new_grad_arr).to(self.device)
 
-    def trans_features_for_distill(self, features_dict):
+    def trans_features_for_dist(self, features_dict):
+        def get_conv_attn_feature(feature):
+            return F.normalize(torch.sum(torch.pow(feature, 2), dim=1)).view(feature.shape[0], -1)
+
         dist_features = list()
         for name, feature in features_dict.items():
-            if 'conv' in name and 'fc' not in self.args.distill_mode:
-                dist_features.append(F.normalize(torch.sum(torch.pow(feature, 2), dim=1)).view(feature.shape[0], -1))
-            elif 'fc' in name and 'conv' not in self.args.distill_mode:
+            if 'conv' in name and 'fc' not in self.args.dist_mode:
+                dist_features.append(get_conv_attn_feature(feature))
+            elif 'fc' in name and 'conv' not in self.args.dist_mode:
                 dist_features.append(feature)
         return dist_features
 
-    def build_adapt_layers_for_atten(self, s_model, features):
+    def build_adapt_layers_for_atten(self, s_model, dist_features):
         # We only need to use the shape of the features, so we don't need to pass student's and teacher's features to
         # this function at the same time
         adapt_layers = list()
-        for feature in features:
+        for feature in dist_features:
             adapt_layers.append(nn.Linear(feature.shape[1], self.args.adapt_hidden_size))
         s_model.adapt_layers = nn.ModuleList(adapt_layers)
         s_model.adapt_layers.to(self.device)
@@ -92,8 +95,12 @@ class GDAPModelTrainer(Trainer):
             weight_decay=self.args.weight_decay
         )
 
-    def get_GAD_loss(self, s_features, t_features):
-        pass
+    def get_GAD_loss(self, s_dist_features, t_dist_features):
+        dist_losses = list()
+        for s_feature, t_feature in zip(s_dist_features, t_dist_features):
+            print(s_feature.shape, t_feature.shape)
+        print(len(s_dist_features), len(t_dist_features))
+        raise Exception
 
     def get_loss_and_backward(self, batch, global_step):
         input_var, target_var = batch
@@ -111,19 +118,21 @@ class GDAPModelTrainer(Trainer):
             self.s_model.prune(self.args.prune_mode, self.args.prune_rates)
 
         # ---------------------------------------------
-        # 1. Do the gradually self-distillation combined with attention mechanism
-        # 2. Get loss and do backward, and then set the gradient of the pruned weights to 0 if it's in the "hard"
+        # 1. Get the output of each layers of student's and teacher's model and transform them for distillation
+        # 2. If "self.init_adapt_layers" is "False", initialize the adaption layers for the attention mechanism
+        # 3. Do the gradually self-distillation combined with attention mechanism
+        # 4. Get loss and do backward, and then set the gradient of the pruned weights to 0 if it's in the "hard"
         #    prune mode
         # ---------------------------------------------
-        t_output_var, t_features_dict = self.t_model_with_FE(input_var)
         s_output_var, s_features_dict = self.s_model_with_FE(input_var)
-        t_d_features = self.trans_features_for_distill(t_features_dict)
-        s_d_features = self.trans_features_for_distill(s_features_dict)
+        t_output_var, t_features_dict = self.t_model_with_FE(input_var)
+        s_dist_features = self.trans_features_for_dist(s_features_dict)
+        t_dist_features = self.trans_features_for_dist(t_features_dict)
         if not self.init_adapt_layers:
             self.init_adapt_layers = True
-            self.build_adapt_layers_for_atten(self.s_model, s_d_features)
+            self.build_adapt_layers_for_atten(self.s_model, s_dist_features)
         pred_loss = self.cross_entropy(s_output_var, target_var)
-        GAD_loss = self.get_GAD_loss(s_d_features, t_d_features)
+        GAD_loss = self.get_GAD_loss(s_dist_features, t_dist_features)
         total_loss = pred_loss + GAD_loss
         total_loss.backward()
         if 'hard' in self.args.prune_mode:
@@ -169,7 +178,7 @@ def main():
     optimizer = optim.SGD(s_model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
     base_trainer_cfg = (args, s_model, train_loader, eval_loader, optimizer, args.save_dir, get_device())
     writer = SummaryWriter(log_dir=args.log_dir)  # for tensorboardX
-    trainer = GDAPModelTrainer(t_model, args.adapt_hidden_size, writer, *base_trainer_cfg)
+    trainer = PGADModelTrainer(t_model, args.adapt_hidden_size, writer, *base_trainer_cfg)
     trainer.eval()  # Show loaded model performance as baseline
     trainer.train()
     if 'soft' in args.prune_mode:
