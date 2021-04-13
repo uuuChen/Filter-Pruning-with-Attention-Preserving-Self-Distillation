@@ -2,7 +2,7 @@ import numpy as np
 import torch
 from torch.nn.modules.module import Module
 
-from util import z_score_v2
+from util import z_score_v2, min_max_scalar
 
 
 class FilterPruningModule(Module):
@@ -38,23 +38,23 @@ class FilterPruningModule(Module):
             flat_f_w = f_w.reshape(f_w.shape[0], -1)
             _sum_of_dists = np.array([np.sum(np.power(flat_f_w - per_f_w, 2)) for per_f_w in flat_f_w])
             _sum_of_grads = np.sum(np.abs(f_g.reshape(f_g.shape[0], -1)), 1)
-            sum_of_objs = z_score_v2(_sum_of_dists) * z_score_v2(_sum_of_grads)
+            sum_of_objs = min_max_scalar(_sum_of_dists) + min_max_scalar(_sum_of_grads)
             num_of_objs = f_w.shape[0]
         elif 'filter-ga' in mode:  # Combine gradient-base and activation-base
             flat_f_w = f_w.reshape(f_w.shape[0], -1)
-            grad_flat_arr = f_g.reshape(f_g.shape[0], -1)
-            sum_of_objs = np.sum(np.abs(flat_f_w) * np.abs(grad_flat_arr), 1)
+            flat_f_g = f_g.reshape(f_g.shape[0], -1)
+            sum_of_objs = np.sum(np.abs(flat_f_w) * np.abs(flat_f_g), 1)
             num_of_objs = f_w.shape[0]
         elif 'filter-nga' in mode:  # Combine norm-gradient-base and norm-activation-base
-            filters_flat_arr = f_w.reshape(f_w.shape[0], -1)
-            grad_flat_arr = f_g.reshape(f_g.shape[0], -1)
-            sum_of_objs = np.sum(z_score_v2(np.abs(filters_flat_arr)) * z_score_v2(np.abs(grad_flat_arr)), 1)
+            flat_f_w = f_w.reshape(f_w.shape[0], -1)
+            flat_f_g = f_g.reshape(f_g.shape[0], -1)
+            sum_of_objs = np.sum(min_max_scalar(np.abs(flat_f_w)) + min_max_scalar(np.abs(flat_f_g)), 1)
             num_of_objs = f_w.shape[0]
-        object_indices = np.argsort(sum_of_objs)
-        pruned_object_nums = round(num_of_objs * prune_rates)
-        pruned_indices = np.sort(object_indices[:pruned_object_nums])
-        print(pruned_indices)
-        return pruned_indices
+        idx_of_objs = np.argsort(sum_of_objs)
+        prune_num_of_objs = round(num_of_objs * prune_rates)
+        prune_idx_of_objs = np.sort(idx_of_objs[:prune_num_of_objs])
+        print(prune_idx_of_objs)
+        return prune_idx_of_objs
 
     @staticmethod
     def _prune_by_indices(module, dim, indices):

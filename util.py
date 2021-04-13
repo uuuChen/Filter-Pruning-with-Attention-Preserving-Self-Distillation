@@ -77,6 +77,10 @@ def z_score_v2(x):
     return (x - np.min(x)) / np.std(x)
 
 
+def min_max_scalar(x):
+    return (x - np.min(x)) / (np.max(x) - np.min(x))
+
+
 class AverageMeter:
     def __init__(self):
         self.n = 0
