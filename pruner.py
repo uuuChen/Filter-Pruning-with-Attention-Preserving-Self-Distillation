@@ -26,6 +26,12 @@ class FilterPruningModule(Module):
             filters_flat_arr = filters_weight.reshape(filters_weight.shape[0], -1)
             sum_of_objects = np.array([np.sum(np.power(filters_flat_arr - arr, 2)) for arr in filters_flat_arr])
             object_nums = filters_weight.shape[0]
+        elif 'filter-ggm' in mode:
+            filters_flat_arr = filters_weight.reshape(filters_weight.shape[0], -1)
+            grad_flat_arr = filters_grad.reshape(filters_grad.shape[0], -1)
+            sum_of_objects = np.array([np.sum(np.power(filters_flat_arr - arr, 2)) for arr in filters_flat_arr])
+            sum_of_objects *= np.sum(np.abs(grad_flat_arr), 1)
+            object_nums = filters_weight.shape[0]
         elif 'filter-ga' in mode:  # Combine gradient-base and activation-base
             filters_flat_arr = filters_weight.reshape(filters_weight.shape[0], -1)
             grad_flat_arr = filters_grad.reshape(filters_grad.shape[0], -1)

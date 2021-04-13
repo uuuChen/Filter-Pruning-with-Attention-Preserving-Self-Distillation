@@ -27,10 +27,10 @@ parser.add_argument('--dataset', type=str, default='cifar100')
 parser.add_argument('--schedule', type=int, nargs='+', default=[50, 100, 150])
 parser.add_argument('--momentum', type=float, default=0.9)
 parser.add_argument('--weight_decay', type=float, default=5e-4)
-parser.add_argument('--prune-mode', type=str, default='hard-filter-ga')
+parser.add_argument('--prune-mode', type=str, default=None)
 parser.add_argument('--prune-rates', nargs='+', type=float, default=[0.16, 0.62, 0.65, 0.63, 0.63])
 parser.add_argument('--prune-interval', type=int, default=sys.maxsize)  # By default we will only prune once
-parser.add_argument('--dist-mode', type=str, default='all')  # mode: {'conv', 'fc', 'all'}
+parser.add_argument('--dist-mode', type=str, default=None)  # pattern: "((all|conv|fc)(-grad)?-dist|None)"
 parser.add_argument('--t-load-model-path', type=str, default=None)
 parser.add_argument('--s-load-model-path', type=str, default=None)
 parser.add_argument('--adapt-hidden-size', type=int, default=128)
@@ -39,6 +39,7 @@ args = parser.parse_args()
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'  # For Mac OS
 args.save_dir = f'saves/{args.model}_{args.dataset}/{args.prune_mode}'
 args.save_dir += '-once' if args.prune_interval == sys.maxsize else f'-{args.prune_interval}'
+args.save_dir += f'/{args.lr}'
 args.log_dir = os.path.join(args.save_dir, 'log')
 if args.t_load_model_path is None:
     args.t_load_model_path = args.s_load_model_path
@@ -46,13 +47,20 @@ if args.t_load_model_path is None:
 
 class PGADModelTrainer(Trainer):
     """  A trainer for gradually self-distillation combined with attention mechanism and hard or soft pruning. """
-    def __init__(self, t_model, adapt_hidden_size, writer, *args, **kwargs):
+    def __init__(self,
+                 t_model,
+                 adapt_hidden_size,
+                 writer,
+                 *args,
+                 **kwargs):
         super().__init__(*args, **kwargs)
         self.t_model = t_model
         self.s_model = self.model
         self.adapt_hidden_size = adapt_hidden_size
         self.writer = writer
 
+        self.do_prune = self.args.prune_mode is not None
+        self.do_dist = self.args.dist_mode is not None
         self.cross_entropy = nn.CrossEntropyLoss()
         self.filter_prune_rates = self.s_model.get_filters_prune_rates(self.args.prune_rates)
         self.t_model_with_FE = FeatureExtractor(self.t_model)
@@ -106,16 +114,17 @@ class PGADModelTrainer(Trainer):
         input_var, target_var = batch
 
         # Prune the weights per "args.prune_interval"
-        if self.last_epoch != self.cur_epoch and self.cur_epoch % self.args.prune_interval == 0:
-            self.last_epoch = self.cur_epoch
+        if self.do_prune:
+            if self.last_epoch != self.cur_epoch and self.cur_epoch % self.args.prune_interval == 0:
+                self.last_epoch = self.cur_epoch
 
-            # In order to get the gradient and use it on the criterion "filter-ga"
-            s_output_var = self.s_model(input_var)
-            s_loss = self.cross_entropy(s_output_var, target_var)
-            s_loss.backward(retain_graph=True)
+                # In order to get the gradient and use it on the criterion "filter-ga"
+                s_output_var = self.s_model(input_var)
+                s_loss = self.cross_entropy(s_output_var, target_var)
+                s_loss.backward(retain_graph=True)
 
-            # Prune the weights by "args.prune_mode"
-            self.s_model.prune(self.args.prune_mode, self.args.prune_rates)
+                # Prune the weights by "args.prune_mode"
+                self.s_model.prune(self.args.prune_mode, self.args.prune_rates)
 
         # ---------------------------------------------
         # 1. Get the output of each layers of student's and teacher's model and transform them for distillation
@@ -126,15 +135,20 @@ class PGADModelTrainer(Trainer):
         # ---------------------------------------------
         s_output_var, s_features_dict = self.s_model_with_FE(input_var)
         t_output_var, t_features_dict = self.t_model_with_FE(input_var)
-        s_dist_features = self.trans_features_for_dist(s_features_dict)
-        t_dist_features = self.trans_features_for_dist(t_features_dict)
-        if not self.init_adapt_layers:
-            self.init_adapt_layers = True
-            self.build_adapt_layers_for_atten(self.s_model, s_dist_features)
-        pred_loss = self.cross_entropy(s_output_var, target_var)
-        GAD_loss = self.get_GAD_loss(s_dist_features, t_dist_features)
+        if self.do_dist:
+            s_dist_features = self.trans_features_for_dist(s_features_dict)
+            t_dist_features = self.trans_features_for_dist(t_features_dict)
+            if not self.init_adapt_layers:
+                self.init_adapt_layers = True
+                self.build_adapt_layers_for_atten(self.s_model, s_dist_features)
+            pred_loss = self.cross_entropy(s_output_var, target_var)
+            GAD_loss = self.get_GAD_loss(s_dist_features, t_dist_features)
+        else:
+            pred_loss = self.cross_entropy(s_output_var, target_var)
+            GAD_loss = torch.zeros(1)
         total_loss = pred_loss + GAD_loss
         total_loss.backward()
+
         if 'hard' in self.args.prune_mode:
             self.zeroize_pruned_weights_grad()
 
@@ -163,6 +177,7 @@ class PGADModelTrainer(Trainer):
 def main():
     set_seeds(args.seed)
     check_dirs_exist([args.save_dir])
+    device = get_device()
     if args.dataset == 'cifar100':
         train_loader, eval_loader = DataLoader.get_cifar100(args.batch_size)  # get data loader
         num_classes = 100
@@ -171,15 +186,20 @@ def main():
     if args.model == 'alexnet':
         t_model = alexnet(num_classes=num_classes)
         s_model = alexnet(num_classes=num_classes)
-        load_model(t_model, args.t_load_model_path, get_device())
-        load_model(s_model, args.s_load_model_path, get_device())
+        load_model(t_model, args.t_load_model_path, device)
+        load_model(s_model, args.s_load_model_path, device)
     else:
         raise ValueError
     optimizer = optim.SGD(s_model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
-    base_trainer_cfg = (args, s_model, train_loader, eval_loader, optimizer, args.save_dir, get_device())
+    base_trainer_cfg = (args, s_model, train_loader, eval_loader, optimizer, args.save_dir, device)
     writer = SummaryWriter(log_dir=args.log_dir)  # for tensorboardX
-    trainer = PGADModelTrainer(t_model, args.adapt_hidden_size, writer, *base_trainer_cfg)
-    trainer.eval()  # Show loaded model performance as baseline
+    trainer = PGADModelTrainer(
+        t_model,
+        args.adapt_hidden_size,
+        writer,
+        *base_trainer_cfg
+    )
+    # trainer.eval()  # Show loaded model performance as baseline
     trainer.train()
     if 'soft' in args.prune_mode:
         s_model.prune(args.prune_mode, args.prune_rates)
