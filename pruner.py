@@ -2,6 +2,8 @@ import numpy as np
 import torch
 from torch.nn.modules.module import Module
 
+from util import z_score_v2
+
 
 class FilterPruningModule(Module):
     def __init__(self):
@@ -11,34 +13,45 @@ class FilterPruningModule(Module):
 
     @staticmethod
     def _get_prune_indices(conv_module, prune_rates, mode='filter-norm'):
-        filters_weight = conv_module.weight.data.cpu().numpy()
-        filters_grad = conv_module.weight.grad.cpu().numpy()
-        sum_of_objects = None
-        object_nums = None
+        f_w = conv_module.weight.data.cpu().numpy()  # The weight of filters
+        f_g = conv_module.weight.grad.cpu().numpy()  # The gradient of filters
+        sum_of_objs = None
+        num_of_objs = None
         if 'filter-norm' in mode:
-            sum_of_objects = np.sum(np.abs(filters_weight.reshape(filters_weight.shape[0], -1)), 1)
-            object_nums = filters_weight.shape[0]
+            sum_of_objs = np.sum(np.abs(f_w.reshape(f_w.shape[0], -1)), 1)
+            num_of_objs = f_w.shape[0]
         elif 'channel-norm' in mode:
-            perm_conv_arr = np.transpose(filters_weight, (1, 0, 2, 3))  # (fn, cn, kh, kw) => (cn, fn, kh, kw)
-            sum_of_objects = np.sum(np.abs(perm_conv_arr.reshape(perm_conv_arr.shape[0], -1)), 1)
-            object_nums = filters_weight.shape[1]
-        elif 'filter-gm' in mode:
-            filters_flat_arr = filters_weight.reshape(filters_weight.shape[0], -1)
-            sum_of_objects = np.array([np.sum(np.power(filters_flat_arr - arr, 2)) for arr in filters_flat_arr])
-            object_nums = filters_weight.shape[0]
-        elif 'filter-ggm' in mode:
-            filters_flat_arr = filters_weight.reshape(filters_weight.shape[0], -1)
-            grad_flat_arr = filters_grad.reshape(filters_grad.shape[0], -1)
-            sum_of_objects = np.array([np.sum(np.power(filters_flat_arr - arr, 2)) for arr in filters_flat_arr])
-            sum_of_objects *= np.sum(np.abs(grad_flat_arr), 1)
-            object_nums = filters_weight.shape[0]
+            perm_f_w = np.transpose(f_w, (1, 0, 2, 3))  # (fn, cn, kh, kw) => (cn, fn, kh, kw)
+            sum_of_objs = np.sum(np.abs(perm_f_w.reshape(perm_f_w.shape[0], -1)), 1)
+            num_of_objs = f_w.shape[1]
+        elif 'filter-gm' in mode:  # Geometric-median
+            flat_f_w = f_w.reshape(f_w.shape[0], -1)
+            sum_of_objs = np.array([np.sum(np.power(flat_f_w - per_f_w, 2)) for per_f_w in flat_f_w])
+            num_of_objs = f_w.shape[0]
+        elif 'filter-ggm' in mode:  # Combine gradient-base and geometric-median
+            flat_f_w = f_w.reshape(f_w.shape[0], -1)
+            _sum_of_dists = np.array([np.sum(np.power(flat_f_w - per_f_w, 2)) for per_f_w in flat_f_w])
+            _sum_of_grads = np.sum(np.abs(f_g.reshape(f_g.shape[0], -1)), 1)
+            sum_of_objs = _sum_of_dists * _sum_of_grads
+            num_of_objs = f_w.shape[0]
+        elif 'filter-nggm' in mode:  # Combine norm-gradient-base and norm geometric-median
+            flat_f_w = f_w.reshape(f_w.shape[0], -1)
+            _sum_of_dists = np.array([np.sum(np.power(flat_f_w - per_f_w, 2)) for per_f_w in flat_f_w])
+            _sum_of_grads = np.sum(np.abs(f_g.reshape(f_g.shape[0], -1)), 1)
+            sum_of_objs = z_score_v2(_sum_of_dists) * z_score_v2(_sum_of_grads)
+            num_of_objs = f_w.shape[0]
         elif 'filter-ga' in mode:  # Combine gradient-base and activation-base
-            filters_flat_arr = filters_weight.reshape(filters_weight.shape[0], -1)
-            grad_flat_arr = filters_grad.reshape(filters_grad.shape[0], -1)
-            sum_of_objects = np.sum(np.abs(filters_flat_arr) * np.abs(grad_flat_arr), 1)
-            object_nums = filters_weight.shape[0]
-        object_indices = np.argsort(sum_of_objects)
-        pruned_object_nums = round(object_nums * prune_rates)
+            flat_f_w = f_w.reshape(f_w.shape[0], -1)
+            grad_flat_arr = f_g.reshape(f_g.shape[0], -1)
+            sum_of_objs = np.sum(np.abs(flat_f_w) * np.abs(grad_flat_arr), 1)
+            num_of_objs = f_w.shape[0]
+        elif 'filter-nga' in mode:  # Combine norm-gradient-base and norm-activation-base
+            filters_flat_arr = f_w.reshape(f_w.shape[0], -1)
+            grad_flat_arr = f_g.reshape(f_g.shape[0], -1)
+            sum_of_objs = np.sum(z_score_v2(np.abs(filters_flat_arr)) * z_score_v2(np.abs(grad_flat_arr)), 1)
+            num_of_objs = f_w.shape[0]
+        object_indices = np.argsort(sum_of_objs)
+        pruned_object_nums = round(num_of_objs * prune_rates)
         pruned_indices = np.sort(object_indices[:pruned_object_nums])
         print(pruned_indices)
         return pruned_indices

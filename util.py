@@ -73,6 +73,10 @@ def get_average_meters(n=1):
     return [AverageMeter() for _ in range(n)]
 
 
+def z_score_v2(x):
+    return (x - np.min(x)) / np.std(x)
+
+
 class AverageMeter:
     def __init__(self):
         self.n = 0
