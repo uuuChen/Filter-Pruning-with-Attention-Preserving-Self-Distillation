@@ -69,6 +69,9 @@ class PGADModelTrainer(Trainer):
         self.last_epoch = None
         self.init_adapt_layers = False
 
+        self.t_model.eval()
+        self.t_model = self.t_model.to(self.device)
+
     def zeroize_pruned_weights_grad(self):
         for p in self.s_model.parameters():
             tensor_arr = p.data.cpu().numpy()
@@ -145,7 +148,7 @@ class PGADModelTrainer(Trainer):
             GAD_loss = self.get_GAD_loss(s_dist_features, t_dist_features)
         else:
             pred_loss = self.cross_entropy(s_output_var, target_var)
-            GAD_loss = torch.zeros(1)
+            GAD_loss = torch.zeros(1).to(self.device)
         total_loss = pred_loss + GAD_loss
         total_loss.backward()
 
