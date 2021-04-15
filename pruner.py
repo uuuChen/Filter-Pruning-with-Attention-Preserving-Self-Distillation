@@ -34,6 +34,19 @@ class FilterPruningModule(Module):
             _sum_of_grads = np.sum(np.abs(f_g.reshape(f_g.shape[0], -1)), 1)
             sum_of_objs = _sum_of_dists * _sum_of_grads
             num_of_objs = f_w.shape[0]
+        elif 'filter-ggm2' in mode:  # Combine gradient-base and geometric-median
+            flat_f_w = f_w.reshape(f_w.shape[0], -1)
+            _sum_of_dists = np.array([np.sum(np.power(flat_f_w - per_f_w, 2)) for per_f_w in flat_f_w])
+            _sum_of_grads = np.sum(np.abs(f_g.reshape(f_g.shape[0], -1)), 1)
+            sum_of_objs = _sum_of_dists + _sum_of_grads
+            num_of_objs = f_w.shape[0]
+        elif 'filter-ggm3' in mode:  # Combine norm-gradient-base and norm geometric-median
+            flat_f_w = f_w.reshape(f_w.shape[0], -1)
+            _sum_of_weights = np.sum(np.abs(f_w.reshape(f_w.shape[0], -1)), 1)
+            _sum_of_dists = np.array([np.sum(np.power(flat_f_w - per_f_w, 2)) for per_f_w in flat_f_w])
+            _sum_of_grads = np.sum(np.abs(f_g.reshape(f_g.shape[0], -1)), 1)
+            sum_of_objs = _sum_of_dists * _sum_of_grads * _sum_of_weights
+            num_of_objs = f_w.shape[0]
         elif 'filter-nggm' in mode:  # Combine norm-gradient-base and norm geometric-median
             flat_f_w = f_w.reshape(f_w.shape[0], -1)
             _sum_of_dists = np.array([np.sum(np.power(flat_f_w - per_f_w, 2)) for per_f_w in flat_f_w])
@@ -49,6 +62,11 @@ class FilterPruningModule(Module):
             flat_f_w = f_w.reshape(f_w.shape[0], -1)
             flat_f_g = f_g.reshape(f_g.shape[0], -1)
             sum_of_objs = np.sum(min_max_scalar(np.abs(flat_f_w)) + min_max_scalar(np.abs(flat_f_g)), 1)
+            num_of_objs = f_w.shape[0]
+        elif 'filter-nga2' in mode:  # Combine norm-gradient-base and norm-activation-base
+            flat_f_w = f_w.reshape(f_w.shape[0], -1)
+            flat_f_g = f_g.reshape(f_g.shape[0], -1)
+            sum_of_objs = min_max_scalar(np.sum(np.abs(flat_f_w), 1)) + min_max_scalar(np.sum(np.abs(flat_f_g), 1))
             num_of_objs = f_w.shape[0]
         idx_of_objs = np.argsort(sum_of_objs)
         prune_num_of_objs = round(num_of_objs * prune_rates)
