@@ -27,10 +27,12 @@ parser.add_argument('--dataset', type=str, default='cifar100')
 parser.add_argument('--schedule', type=int, nargs='+', default=[50, 100, 150])
 parser.add_argument('--momentum', type=float, default=0.9)
 parser.add_argument('--weight_decay', type=float, default=5e-4)
+parser.add_argument('--leaky_relu_scope', type=float, default=0.2)
 parser.add_argument('--prune-mode', type=str, default=None)
 parser.add_argument('--prune-rates', nargs='+', type=float, default=[0.16, 0.62, 0.65, 0.63, 0.63])
 parser.add_argument('--prune-interval', type=int, default=sys.maxsize)  # By default we will only prune once
-parser.add_argument('--dist-mode', type=str, default=None)  # pattern: "((all|conv|fc)(-grad)?-dist|None)"
+parser.add_argument('--dist-mode', type=str, default=None)  # pattern: "((all|conv|fc)(-attn)?-dist|None)"
+parser.add_argument('--dist-temperature', type=int, default=1)
 parser.add_argument('--t-load-model-path', type=str, default=None)
 parser.add_argument('--s-load-model-path', type=str, default=None)
 parser.add_argument('--adapt-hidden-size', type=int, default=128)
@@ -61,7 +63,10 @@ class PGADModelTrainer(Trainer):
 
         self.do_prune = self.args.prune_mode is not None
         self.do_dist = self.args.dist_mode is not None
+        self.mse_loss = nn.MSELoss()
         self.cross_entropy = nn.CrossEntropyLoss()
+        self.kl_div = nn.KLDivLoss(reduction='batchmean')  # Not sure for using "batchmean"
+        self.leaky_relu = nn.LeakyReLU(negative_slope=self.args.leaky_relu_scope)
         self.filter_prune_rates = self.s_model.get_filters_prune_rates(self.args.prune_rates)
         self.t_model_with_FE = FeatureExtractor(self.t_model)
         self.s_model_with_FE = FeatureExtractor(self.s_model)
@@ -84,10 +89,12 @@ class PGADModelTrainer(Trainer):
             return F.normalize(torch.sum(torch.pow(feature, 2), dim=1)).view(feature.shape[0], -1)
 
         dist_features = list()
-        for name, feature in features_dict.items():
+        for i, (name, feature) in enumerate(features_dict.items(), start=1):
             if 'conv' in name and 'fc' not in self.args.dist_mode:
                 dist_features.append(get_conv_attn_feature(feature))
             elif 'fc' in name and 'conv' not in self.args.dist_mode:
+                dist_features.append(feature)
+            elif i == len(features_dict):  # The Layer which outputs logits
                 dist_features.append(feature)
         return dist_features
 
@@ -96,8 +103,9 @@ class PGADModelTrainer(Trainer):
         # this function at the same time
         adapt_layers = list()
         for feature in dist_features:
-            adapt_layers.append(nn.Linear(feature.shape[1], self.args.adapt_hidden_size))
+            adapt_layers.append(nn.Linear(feature.shape[1], self.args.adapt_hidden_size, bias=False))
         s_model.adapt_layers = nn.ModuleList(adapt_layers)
+        s_model.attn_layer = nn.Linear(2 * self.args.adapt_hidden_size, 1, bias=False)
         s_model.adapt_layers.to(self.device)
         self.optimizer = optim.SGD(
             self.s_model.parameters(),
@@ -107,11 +115,33 @@ class PGADModelTrainer(Trainer):
         )
 
     def get_GAD_loss(self, s_dist_features, t_dist_features):
-        dist_losses = list()
-        for s_feature, t_feature in zip(s_dist_features, t_dist_features):
-            print(s_feature.shape, t_feature.shape)
-        print(len(s_dist_features), len(t_dist_features))
-        raise Exception
+        # Get feature losses
+        feature_losses = list()
+        for s_feature, t_feature in zip(s_dist_features[:-1], t_dist_features[:-1]):
+            feature_losses.append(self.mse_loss(s_feature, t_feature.detach()))
+        feature_losses = torch.stack(feature_losses)
+
+        # Get soft logit loss
+        T = self.args.dist_temperature
+        soft_logit_loss = self.kl_div(
+            F.log_softmax(s_dist_features[-1] / T, dim=1),
+            F.softmax(t_dist_features[-1] / T, dim=1),
+        ) * T * T
+
+        # Get attention coefficients
+        attn_scores = list()
+        for i, (s_feature, t_feature) in enumerate(zip(s_dist_features, t_dist_features)):
+            Ws = self.model.adapt_layers[i](s_feature.detach())
+            Wt = self.model.adapt_layers[i](t_feature.detach())
+            attn_input = torch.cat([Ws, Wt], dim=1)
+            attn_score = torch.mean(self.leaky_relu(self.model.attn_layer(attn_input)))
+            attn_scores.append(attn_score)
+        attn_coefs = F.softmax(torch.stack(attn_scores, dim=0), dim=0)
+
+        # Combine feature losses and soft logit loss with attention coefficients
+        dist_losses = torch.cat((feature_losses, soft_logit_loss.view(1)), dim=0)
+        gad_loss = torch.mean(torch.mul(dist_losses, attn_coefs))
+        return gad_loss
 
     def get_loss_and_backward(self, batch, global_step):
         input_var, target_var = batch
