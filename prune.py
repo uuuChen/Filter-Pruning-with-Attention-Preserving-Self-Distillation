@@ -41,7 +41,7 @@ args = parser.parse_args()
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'  # For Mac OS
 args.save_dir = f'saves/{args.model}_{args.dataset}/{args.prune_mode}'
 args.save_dir += '-once' if args.prune_interval == sys.maxsize else f'-{args.prune_interval}'
-args.save_dir += f'/{args.lr}'
+args.save_dir += f'/{args.dist_mode}/{args.lr}'
 args.log_dir = os.path.join(args.save_dir, 'log')
 if args.t_load_model_path is None:
     args.t_load_model_path = args.s_load_model_path
@@ -63,6 +63,7 @@ class PGADModelTrainer(Trainer):
 
         self.do_prune = self.args.prune_mode is not None
         self.do_dist = self.args.dist_mode is not None
+        self.do_attn = 'attn' in self.args.dist_mode
         self.mse_loss = nn.MSELoss()
         self.cross_entropy = nn.CrossEntropyLoss()
         self.kl_div = nn.KLDivLoss(reduction='batchmean')  # Not sure for using "batchmean"
@@ -106,7 +107,7 @@ class PGADModelTrainer(Trainer):
             adapt_layers.append(nn.Linear(feature.shape[1], self.args.adapt_hidden_size, bias=False))
         s_model.adapt_layers = nn.ModuleList(adapt_layers)
         s_model.attn_layer = nn.Linear(2 * self.args.adapt_hidden_size, 1, bias=False)
-        s_model.adapt_layers.to(self.device)
+        s_model.to(self.device)
         self.optimizer = optim.SGD(
             self.s_model.parameters(),
             lr=self.args.lr,
@@ -129,21 +130,25 @@ class PGADModelTrainer(Trainer):
         ) * T * T
 
         # Get attention coefficients
-        attn_scores = list()
-        for i, (s_feature, t_feature) in enumerate(zip(s_dist_features, t_dist_features)):
-            Ws = self.model.adapt_layers[i](s_feature.detach())
-            Wt = self.model.adapt_layers[i](t_feature.detach())
-            attn_input = torch.cat([Ws, Wt], dim=1)
-            attn_score = torch.mean(self.leaky_relu(self.model.attn_layer(attn_input)))
-            attn_scores.append(attn_score)
-        attn_coefs = F.softmax(torch.stack(attn_scores, dim=0), dim=0)
+        if self.do_attn:
+            attn_scores = list()
+            for i, (s_feature, t_feature) in enumerate(zip(s_dist_features, t_dist_features)):
+                Ws = self.model.adapt_layers[i](s_feature.detach())
+                Wt = self.model.adapt_layers[i](t_feature.detach())
+                attn_input = torch.cat([Ws, Wt], dim=1)
+                attn_score = torch.mean(self.leaky_relu(self.model.attn_layer(attn_input)))
+                attn_scores.append(attn_score)
+            attn_coefs = F.softmax(torch.stack(attn_scores, dim=0), dim=0)
+        else:
+            attn_coefs = (torch.div(torch.ones(len(s_dist_features)), len(s_dist_features))).to(self.device)
 
         # Combine feature losses and soft logit loss with attention coefficients
         dist_losses = torch.cat((feature_losses, soft_logit_loss.view(1)), dim=0)
         gad_loss = torch.mean(torch.mul(dist_losses, attn_coefs))
+        print(list(zip(dist_losses.cpu().detach().numpy(), attn_coefs.cpu().detach().numpy())))
         return gad_loss
 
-    def get_loss_and_backward(self, batch, global_step):
+    def get_loss_and_backward(self, batch):
         input_var, target_var = batch
 
         # Prune the weights per "args.prune_interval"
@@ -171,7 +176,7 @@ class PGADModelTrainer(Trainer):
         if self.do_dist:
             s_dist_features = self.trans_features_for_dist(s_features_dict)
             t_dist_features = self.trans_features_for_dist(t_features_dict)
-            if not self.init_adapt_layers:
+            if not self.init_adapt_layers and self.do_attn:
                 self.init_adapt_layers = True
                 self.build_adapt_layers_for_atten(self.s_model, s_dist_features)
             pred_loss = self.cross_entropy(s_output_var, target_var)
@@ -179,7 +184,7 @@ class PGADModelTrainer(Trainer):
         else:
             pred_loss = self.cross_entropy(s_output_var, target_var)
             GAD_loss = torch.zeros(1).to(self.device)
-        total_loss = pred_loss + GAD_loss
+        total_loss = pred_loss + GAD_loss * 50
         total_loss.backward()
 
         if 'hard' in self.args.prune_mode:
@@ -195,7 +200,7 @@ class PGADModelTrainer(Trainer):
                 'lr': self.cur_lr,
                 'top1': top1,
                 'top5': top5
-            }, global_step
+            }, self.global_step
         )
         return total_loss, top1, top5
 

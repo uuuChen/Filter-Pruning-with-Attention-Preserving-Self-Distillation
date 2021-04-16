@@ -19,12 +19,13 @@ class Trainer(object):
         self.device = device  # device name
 
         self.cur_epoch = None
+        self.global_step = None
         self.cur_lr = args.lr
 
     def _get_save_model_path(self, i):
         return os.path.join(self.save_dir, f'model_epochs_{i}.pt')
 
-    def _train_epoch(self, global_step):
+    def _train_epoch(self):
         self.model.train()  # train mode
         e_loss, e_top1, e_top5 = get_average_meters(n=3)
         iter_bar = tqdm(self.train_data_iter)
@@ -33,10 +34,10 @@ class Trainer(object):
             batch = [t.to(self.device) for t in batch]
 
             self.optimizer.zero_grad()
-            b_loss, b_top1, b_top5 = self.get_loss_and_backward(batch, global_step)
+            b_loss, b_top1, b_top5 = self.get_loss_and_backward(batch)
             self.optimizer.step()
 
-            global_step += 1
+            self.global_step += 1
             e_loss.update(b_loss.item(), len(batch))
             e_top1.update(b_top1.item(), len(batch))
             e_top5.update(b_top5.item(), len(batch))
@@ -62,7 +63,7 @@ class Trainer(object):
         return e_result_dict
 
     @abstractmethod
-    def get_loss_and_backward(self, batch, global_step):
+    def get_loss_and_backward(self, batch):
         return NotImplementedError
 
     @abstractmethod
@@ -73,11 +74,11 @@ class Trainer(object):
         """ Train Loop """
         self.model.train()  # train mode
         self.model = self.model.to(self.device)
-        global_step = 0  # global iteration steps regardless of epochs
         best_top1 = 0.
+        self.global_step = 0
         for epoch in range(self.args.n_epochs):
             self.cur_epoch = epoch
-            self._train_epoch(global_step)
+            self._train_epoch()
             eval_result = self._eval_epoch()
             if best_top1 < eval_result['top1']:
                 best_top1 = eval_result['top1']

@@ -35,7 +35,7 @@ class InitialModelTrainer(Trainer):
         self.writer = writer
         self.cross_entropy = nn.CrossEntropyLoss()
 
-    def get_loss_and_backward(self, batch, global_step):
+    def get_loss_and_backward(self, batch):
         input_var, target_var = batch
         output_var = self.model(input_var)
         loss = self.cross_entropy(output_var, target_var)
@@ -47,7 +47,7 @@ class InitialModelTrainer(Trainer):
                 'lr': self.cur_lr,
                 'top1': top1,
                 'top5': top5
-            }, global_step
+            }, self.global_step
         )
         return loss, top1, top5
 
