@@ -2,8 +2,18 @@ import argparse
 import os
 import sys
 import numpy as np
+import math
 
-from util import check_dirs_exist, get_device, accuracy, load_model, save_model, print_nonzeros, set_seeds
+from util import (
+    check_dirs_exist,
+    get_device,
+    accuracy,
+    load_model,
+    save_model,
+    print_nonzeros,
+    set_seeds,
+    log_to_file
+)
 from data_loader import DataLoader
 from models.alexnet import alexnet
 from models.feature_extractor import FeatureExtractor
@@ -28,13 +38,13 @@ parser.add_argument('--schedule', type=int, nargs='+', default=[50, 100, 150])
 parser.add_argument('--momentum', type=float, default=0.9)
 parser.add_argument('--weight_decay', type=float, default=5e-4)
 parser.add_argument('--leaky_relu_scope', type=float, default=0.2)
-parser.add_argument('--prune-mode', type=str, default=None)
+parser.add_argument('--prune-mode', type=str, default='None')
 parser.add_argument('--prune-rates', nargs='+', type=float, default=[0.16, 0.62, 0.65, 0.63, 0.63])
 parser.add_argument('--prune-interval', type=int, default=sys.maxsize)  # By default we will only prune once
-parser.add_argument('--dist-mode', type=str, default=None)  # pattern: "((all|conv|fc)(-attn)?-dist|None)"
-parser.add_argument('--dist-temperature', type=int, default=1)
-parser.add_argument('--t-load-model-path', type=str, default=None)
-parser.add_argument('--s-load-model-path', type=str, default=None)
+parser.add_argument('--dist-mode', type=str, default='None')  # pattern: "((all|conv|fc)(-attn)?-dist|None)"
+parser.add_argument('--dist-temperature', type=float, default=1.)
+parser.add_argument('--t-load-model-path', type=str, default='None')
+parser.add_argument('--s-load-model-path', type=str, default='None')
 parser.add_argument('--adapt-hidden-size', type=int, default=128)
 args = parser.parse_args()
 
@@ -43,7 +53,8 @@ args.save_dir = f'saves/{args.model}_{args.dataset}/{args.prune_mode}'
 args.save_dir += '-once' if args.prune_interval == sys.maxsize else f'-{args.prune_interval}'
 args.save_dir += f'/{args.dist_mode}/{args.lr}'
 args.log_dir = os.path.join(args.save_dir, 'log')
-if args.t_load_model_path is None:
+args.log_file_path = os.path.join(args.save_dir, "args.txt")
+if args.t_load_model_path is 'None':
     args.t_load_model_path = args.s_load_model_path
 
 
@@ -61,9 +72,10 @@ class PGADModelTrainer(Trainer):
         self.adapt_hidden_size = adapt_hidden_size
         self.writer = writer
 
-        self.do_prune = self.args.prune_mode is not None
-        self.do_dist = self.args.dist_mode is not None
-        self.do_attn = 'attn' in self.args.dist_mode
+        self.do_prune = self.args.prune_mode is not 'None'
+        self.do_dist = self.args.dist_mode is not 'None'
+        self.do_attn_dist = 'attn' in self.args.dist_mode
+        self.do_grad_dist = 'grad' in self.args.dist_mode
         self.mse_loss = nn.MSELoss()
         self.cross_entropy = nn.CrossEntropyLoss()
         self.kl_div = nn.KLDivLoss(reduction='batchmean')  # Not sure for using "batchmean"
@@ -116,6 +128,8 @@ class PGADModelTrainer(Trainer):
         )
 
     def get_GAD_loss(self, s_dist_features, t_dist_features):
+        n_all_dist_layers = len(s_dist_features)
+
         # Get feature losses
         feature_losses = list()
         for s_feature, t_feature in zip(s_dist_features[:-1], t_dist_features[:-1]):
@@ -130,7 +144,7 @@ class PGADModelTrainer(Trainer):
         ) * T * T
 
         # Get attention coefficients
-        if self.do_attn:
+        if self.do_attn_dist:
             attn_scores = list()
             for i, (s_feature, t_feature) in enumerate(zip(s_dist_features, t_dist_features)):
                 Ws = self.model.adapt_layers[i](s_feature.detach())
@@ -138,14 +152,23 @@ class PGADModelTrainer(Trainer):
                 attn_input = torch.cat([Ws, Wt], dim=1)
                 attn_score = torch.mean(self.leaky_relu(self.model.attn_layer(attn_input)))
                 attn_scores.append(attn_score)
-            attn_coefs = F.softmax(torch.stack(attn_scores, dim=0), dim=0)
+            dist_coefs = F.softmax(torch.stack(attn_scores, dim=0), dim=0)
+        elif self.do_grad_dist:
+            n_grad_dist_layers = min(
+                math.ceil(((self.cur_epoch + 1) / self.args.n_epochs) * n_all_dist_layers * 2),
+                n_all_dist_layers
+            )
+            mask = np.zeros(n_all_dist_layers)
+            mask[:n_grad_dist_layers] = 1 / n_grad_dist_layers
+            dist_coefs = torch.from_numpy(mask).to(self.device)
         else:
-            attn_coefs = (torch.div(torch.ones(len(s_dist_features)), len(s_dist_features))).to(self.device)
+            mask = np.ones(n_all_dist_layers) / n_all_dist_layers
+            dist_coefs = torch.from_numpy(mask).to(self.device)
 
         # Combine feature losses and soft logit loss with attention coefficients
         dist_losses = torch.cat((feature_losses, soft_logit_loss.view(1)), dim=0)
-        gad_loss = torch.mean(torch.mul(dist_losses, attn_coefs))
-        print(list(zip(dist_losses.cpu().detach().numpy(), attn_coefs.cpu().detach().numpy())))
+        gad_loss = torch.mean(torch.mul(dist_losses, dist_coefs))
+        print(list(zip(dist_losses.cpu().detach().numpy(), dist_coefs.cpu().detach().numpy())))
         return gad_loss
 
     def get_loss_and_backward(self, batch):
@@ -176,7 +199,7 @@ class PGADModelTrainer(Trainer):
         if self.do_dist:
             s_dist_features = self.trans_features_for_dist(s_features_dict)
             t_dist_features = self.trans_features_for_dist(t_features_dict)
-            if not self.init_adapt_layers and self.do_attn:
+            if not self.init_adapt_layers and self.do_attn_dist:
                 self.init_adapt_layers = True
                 self.build_adapt_layers_for_atten(self.s_model, s_dist_features)
             pred_loss = self.cross_entropy(s_output_var, target_var)
@@ -215,6 +238,7 @@ class PGADModelTrainer(Trainer):
 def main():
     set_seeds(args.seed)
     check_dirs_exist([args.save_dir])
+    log_to_file(str(args), args.log_file_path)
     device = get_device()
     if args.dataset == 'cifar100':
         train_loader, eval_loader = DataLoader.get_cifar100(args.batch_size)  # get data loader

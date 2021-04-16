@@ -81,6 +81,11 @@ def min_max_scalar(x):
     return (x - np.min(x)) / (np.max(x) - np.min(x))
 
 
+def log_to_file(text, file_path):
+    with open(file_path, "a") as f:
+        f.write(text)
+
+
 class AverageMeter:
     def __init__(self):
         self.n = 0
