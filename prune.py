@@ -42,7 +42,8 @@ parser.add_argument('--prune-mode', type=str, default='None')
 parser.add_argument('--prune-rates', nargs='+', type=float, default=[0.16, 0.62, 0.65, 0.63, 0.63])
 parser.add_argument('--prune-interval', type=int, default=sys.maxsize)  # By default we will only prune once
 parser.add_argument('--dist-mode', type=str, default='None')  # pattern: "((all|conv|fc)(-attn)?-dist|None)"
-parser.add_argument('--dist-temperature', type=float, default=1.)
+parser.add_argument('--dist-temperature', type=float, default=1.0)
+parser.add_argument('--gad-factor', type=float, default=50.0)
 parser.add_argument('--t-load-model-path', type=str, default='None')
 parser.add_argument('--s-load-model-path', type=str, default='None')
 parser.add_argument('--adapt-hidden-size', type=int, default=128)
@@ -111,22 +112,6 @@ class PGADModelTrainer(Trainer):
                 dist_features.append(feature)
         return dist_features
 
-    def build_adapt_layers_for_atten(self, s_model, dist_features):
-        # We only need to use the shape of the features, so we don't need to pass student's and teacher's features to
-        # this function at the same time
-        adapt_layers = list()
-        for feature in dist_features:
-            adapt_layers.append(nn.Linear(feature.shape[1], self.args.adapt_hidden_size, bias=False))
-        s_model.adapt_layers = nn.ModuleList(adapt_layers)
-        s_model.attn_layer = nn.Linear(2 * self.args.adapt_hidden_size, 1, bias=False)
-        s_model.to(self.device)
-        self.optimizer = optim.SGD(
-            self.s_model.parameters(),
-            lr=self.args.lr,
-            momentum=self.args.momentum,
-            weight_decay=self.args.weight_decay
-        )
-
     def get_GAD_loss(self, s_dist_features, t_dist_features):
         n_all_dist_layers = len(s_dist_features)
 
@@ -147,12 +132,10 @@ class PGADModelTrainer(Trainer):
         if self.do_attn_dist:
             attn_scores = list()
             for i, (s_feature, t_feature) in enumerate(zip(s_dist_features, t_dist_features)):
-                Ws = self.model.adapt_layers[i](s_feature.detach())
-                Wt = self.model.adapt_layers[i](t_feature.detach())
-                attn_input = torch.cat([Ws, Wt], dim=1)
-                attn_score = torch.mean(self.leaky_relu(self.model.attn_layer(attn_input)))
+                attn_score = torch.mean(torch.abs(t_feature.detach() - s_feature.detach()))
                 attn_scores.append(attn_score)
-            dist_coefs = F.softmax(torch.stack(attn_scores, dim=0), dim=0)
+            attn_scores = torch.stack(attn_scores, dim=0)
+            dist_coefs = attn_scores / torch.sum(attn_scores)
         elif self.do_grad_dist:
             n_grad_dist_layers = min(
                 math.ceil(((self.cur_epoch + 1) / self.args.n_epochs) * n_all_dist_layers * 2),
@@ -199,15 +182,12 @@ class PGADModelTrainer(Trainer):
         if self.do_dist:
             s_dist_features = self.trans_features_for_dist(s_features_dict)
             t_dist_features = self.trans_features_for_dist(t_features_dict)
-            if not self.init_adapt_layers and self.do_attn_dist:
-                self.init_adapt_layers = True
-                self.build_adapt_layers_for_atten(self.s_model, s_dist_features)
             pred_loss = self.cross_entropy(s_output_var, target_var)
             GAD_loss = self.get_GAD_loss(s_dist_features, t_dist_features)
         else:
             pred_loss = self.cross_entropy(s_output_var, target_var)
             GAD_loss = torch.zeros(1).to(self.device)
-        total_loss = pred_loss + GAD_loss * 50
+        total_loss = pred_loss + GAD_loss * self.args.gad_factor
         total_loss.backward()
 
         if 'hard' in self.args.prune_mode:
