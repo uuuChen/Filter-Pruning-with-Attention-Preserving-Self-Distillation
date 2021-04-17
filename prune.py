@@ -41,7 +41,7 @@ parser.add_argument('--leaky_relu_scope', type=float, default=0.2)
 parser.add_argument('--prune-mode', type=str, default='None')
 parser.add_argument('--prune-rates', nargs='+', type=float, default=[0.16, 0.62, 0.65, 0.63, 0.63])
 parser.add_argument('--prune-interval', type=int, default=sys.maxsize)  # By default we will only prune once
-parser.add_argument('--dist-mode', type=str, default='None')  # pattern: "((all|conv|fc)(-attn)?-dist|None)"
+parser.add_argument('--dist-mode', type=str, default='None')  # pattern: "((all|conv|fc)(-attn)?(-grad)?-dist|None)"
 parser.add_argument('--dist-temperature', type=float, default=1.0)
 parser.add_argument('--gad-factor', type=float, default=50.0)
 parser.add_argument('--t-load-model-path', type=str, default='None')
@@ -129,7 +129,21 @@ class PGADModelTrainer(Trainer):
         ) * T * T
 
         # Get attention coefficients
-        if self.do_attn_dist:
+        if self.do_grad_dist and self.do_attn_dist:
+            n_grad_dist_layers = min(
+                math.ceil(((self.cur_epoch + 1) / self.args.n_epochs) * n_all_dist_layers * 2),
+                n_all_dist_layers
+            )
+            attn_scores = list()
+            grad_dist_features_pair = list(zip(s_dist_features, t_dist_features))[:n_grad_dist_layers]
+            for i, (s_feature, t_feature) in enumerate(grad_dist_features_pair):
+                attn_score = torch.mean(torch.abs(t_feature.detach() - s_feature.detach()))
+                attn_scores.append(attn_score)
+            zero_pad = torch.zeros(n_all_dist_layers - n_grad_dist_layers).to(self.device)
+            attn_scores = torch.stack(attn_scores, dim=0)
+            dist_coefs = attn_scores / torch.sum(attn_scores)
+            dist_coefs = torch.cat((dist_coefs, zero_pad), dim=0)
+        elif self.do_attn_dist:
             attn_scores = list()
             for i, (s_feature, t_feature) in enumerate(zip(s_dist_features, t_dist_features)):
                 attn_score = torch.mean(torch.abs(t_feature.detach() - s_feature.detach()))
@@ -171,10 +185,8 @@ class PGADModelTrainer(Trainer):
                 self.s_model.prune(self.args.prune_mode, self.args.prune_rates)
 
         # ---------------------------------------------
-        # 1. Get the output of each layers of student's and teacher's model and transform them for distillation
-        # 2. If "self.init_adapt_layers" is "False", initialize the adaption layers for the attention mechanism
-        # 3. Do the gradually self-distillation combined with attention mechanism
-        # 4. Get loss and do backward, and then set the gradient of the pruned weights to 0 if it's in the "hard"
+        # 1. Do the gradually self-distillation combined with attention mechanism
+        # 2. Get loss and do backward, and then set the gradient of the pruned weights to 0 if it's in the "hard"
         #    prune mode
         # ---------------------------------------------
         s_output_var, s_features_dict = self.s_model_with_FE(input_var)
