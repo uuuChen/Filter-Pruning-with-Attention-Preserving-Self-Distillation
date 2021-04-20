@@ -42,6 +42,7 @@ parser.add_argument('--prune-mode', type=str, default='None')
 parser.add_argument('--prune-rates', nargs='+', type=float, default=[0.16, 0.62, 0.65, 0.63, 0.63])
 parser.add_argument('--prune-interval', type=int, default=sys.maxsize)  # By default we will only prune once
 parser.add_argument('--dist-mode', type=str, default='None')  # pattern: "((all|conv|fc)(-attn)?(-grad)?-dist|None)"
+parser.add_argument('--dist-method', type=str, default='attn-feature')
 parser.add_argument('--dist-temperature', type=float, default=1.0)
 parser.add_argument('--gad-factor', type=float, default=50.0)
 parser.add_argument('--t-load-model-path', type=str, default='None')
@@ -75,21 +76,58 @@ class PGADModelTrainer(Trainer):
 
         self.do_prune = self.args.prune_mode is not 'None'
         self.do_dist = self.args.dist_mode is not 'None'
+        self.do_hard_prune = 'hard' in self.args.prune_mode
+        self.do_soft_prune = 'soft' in self.args.prune_mode
         self.do_attn_dist = 'attn' in self.args.dist_mode
         self.do_grad_dist = 'grad' in self.args.dist_mode
+        self.do_conv_dist = 'conv' in self.args.dist_mode
+        self.do_fc_dist = 'fc' in self.args.dist_mode
         self.mse_loss = nn.MSELoss()
         self.cross_entropy = nn.CrossEntropyLoss()
         self.kl_div = nn.KLDivLoss(reduction='batchmean')  # Not sure for using "batchmean"
         self.leaky_relu = nn.LeakyReLU(negative_slope=self.args.leaky_relu_scope)
+
         self.filter_prune_rates = self.s_model.get_filters_prune_rates(self.args.prune_rates)
         self.t_model_with_FE = FeatureExtractor(self.t_model)
         self.s_model_with_FE = FeatureExtractor(self.s_model)
-
         self.last_epoch = None
         self.init_adapt_layers = False
 
         self.t_model.eval()
         self.t_model = self.t_model.to(self.device)
+
+    def _get_GA_coefs(self, s_dist_features, t_dist_features):
+        def get_n_grad_dist_layers(cur_epoch, n_epochs, n_all_dist_layers):
+            _n_grad_dist_layers = math.ceil(((cur_epoch + 1) / n_epochs) * n_all_dist_layers * 2)
+            n_grad_dist_layers = min(_n_grad_dist_layers, n_all_dist_layers)
+            return n_grad_dist_layers
+
+        def get_attn_scores(features_pair):
+            scores = list()
+            for i, (s_feature, t_feature) in enumerate(features_pair):
+                score = torch.mean(torch.abs(t_feature.detach() - s_feature.detach()))
+                scores.append(score)
+            scores = torch.stack(scores, dim=0)
+            scores = scores / torch.sum(scores)
+            return scores
+
+        n_all_dist_layers = len(s_dist_features)
+        if self.do_grad_dist and self.do_attn_dist:
+            n_grad_dist_layers = get_n_grad_dist_layers(self.cur_epoch, self.args.n_epochs, n_all_dist_layers)
+            grad_dist_features_pair = list(zip(s_dist_features, t_dist_features))[:n_grad_dist_layers]
+            attn_scores = get_attn_scores(grad_dist_features_pair)
+            dist_coefs = torch.zeros(n_all_dist_layers).to(self.device)
+            dist_coefs[:n_grad_dist_layers] = attn_scores
+        elif self.do_attn_dist:
+            all_dist_features_pair = list(zip(s_dist_features, t_dist_features))
+            dist_coefs = get_attn_scores(all_dist_features_pair)
+        elif self.do_grad_dist:
+            n_grad_dist_layers = get_n_grad_dist_layers(self.cur_epoch, self.args.n_epochs, n_all_dist_layers)
+            dist_coefs = torch.zeros(n_all_dist_layers).to(self.device)
+            dist_coefs[:n_grad_dist_layers] = 1 / n_grad_dist_layers
+        else:
+            dist_coefs = torch.ones(n_all_dist_layers).to(self.device) / n_all_dist_layers
+        return dist_coefs
 
     def zeroize_pruned_weights_grad(self):
         for p in self.s_model.parameters():
@@ -100,22 +138,31 @@ class PGADModelTrainer(Trainer):
 
     def trans_features_for_dist(self, features_dict):
         def get_conv_attn_feature(feature):
-            return F.normalize(torch.sum(torch.pow(feature, 2), dim=1)).view(feature.shape[0], -1)
+            return F.normalize(torch.sum(torch.pow(feature, 2), dim=1).view(feature.shape[0], -1), dim=1)
+
+        def get_conv_flat_feature(feature):
+            return F.normalize(feature.view(feature.shape[0], -1), dim=1)
 
         dist_features = list()
         for i, (name, feature) in enumerate(features_dict.items(), start=1):
-            if 'conv' in name and 'fc' not in self.args.dist_mode:
-                dist_features.append(get_conv_attn_feature(feature))
-            elif 'fc' in name and 'conv' not in self.args.dist_mode:
-                dist_features.append(feature)
+            if 'conv' in name and not self.do_fc_dist:
+                if self.args.dist_method == 'attn-feature':
+                    dist_feature = get_conv_attn_feature(feature)
+                elif self.args.dist_method == 'flat-feature':
+                    dist_feature = get_conv_flat_feature(feature)
+                else:
+                    raise NameError
+            elif 'fc' in name and not self.do_conv_dist:
+                dist_feature = feature
             elif i == len(features_dict):  # The Layer which outputs logits
-                dist_features.append(feature)
+                dist_feature = feature
+            else:
+                continue
+            dist_features.append(dist_feature)
         return dist_features
 
     def get_GAD_loss(self, s_dist_features, t_dist_features):
-        n_all_dist_layers = len(s_dist_features)
-
-        # Get feature losses
+        # Get feature loss of all distilled layers
         feature_losses = list()
         for s_feature, t_feature in zip(s_dist_features[:-1], t_dist_features[:-1]):
             feature_losses.append(self.mse_loss(s_feature, t_feature.detach()))
@@ -125,48 +172,19 @@ class PGADModelTrainer(Trainer):
         T = self.args.dist_temperature
         soft_logit_loss = self.kl_div(
             F.log_softmax(s_dist_features[-1] / T, dim=1),
-            F.softmax(t_dist_features[-1] / T, dim=1),
+            F.softmax(t_dist_features[-1].detach() / T, dim=1),
         ) * T * T
-
-        # Get attention coefficients
-        if self.do_grad_dist and self.do_attn_dist:
-            n_grad_dist_layers = min(
-                math.ceil(((self.cur_epoch + 1) / self.args.n_epochs) * n_all_dist_layers * 2),
-                n_all_dist_layers
-            )
-            attn_scores = list()
-            grad_dist_features_pair = list(zip(s_dist_features, t_dist_features))[:n_grad_dist_layers]
-            for i, (s_feature, t_feature) in enumerate(grad_dist_features_pair):
-                attn_score = torch.mean(torch.abs(t_feature.detach() - s_feature.detach()))
-                attn_scores.append(attn_score)
-            zero_pad = torch.zeros(n_all_dist_layers - n_grad_dist_layers).to(self.device)
-            attn_scores = torch.stack(attn_scores, dim=0)
-            dist_coefs = attn_scores / torch.sum(attn_scores)
-            dist_coefs = torch.cat((dist_coefs, zero_pad), dim=0)
-        elif self.do_attn_dist:
-            attn_scores = list()
-            for i, (s_feature, t_feature) in enumerate(zip(s_dist_features, t_dist_features)):
-                attn_score = torch.mean(torch.abs(t_feature.detach() - s_feature.detach()))
-                attn_scores.append(attn_score)
-            attn_scores = torch.stack(attn_scores, dim=0)
-            dist_coefs = attn_scores / torch.sum(attn_scores)
-        elif self.do_grad_dist:
-            n_grad_dist_layers = min(
-                math.ceil(((self.cur_epoch + 1) / self.args.n_epochs) * n_all_dist_layers * 2),
-                n_all_dist_layers
-            )
-            mask = np.zeros(n_all_dist_layers)
-            mask[:n_grad_dist_layers] = 1 / n_grad_dist_layers
-            dist_coefs = torch.from_numpy(mask).to(self.device)
-        else:
-            mask = np.ones(n_all_dist_layers) / n_all_dist_layers
-            dist_coefs = torch.from_numpy(mask).to(self.device)
 
         # Combine feature losses and soft logit loss with attention coefficients
         dist_losses = torch.cat((feature_losses, soft_logit_loss.view(1)), dim=0)
-        gad_loss = torch.mean(torch.mul(dist_losses, dist_coefs))
-        print(list(zip(dist_losses.cpu().detach().numpy(), dist_coefs.cpu().detach().numpy())))
-        return gad_loss
+        GA_coefs = self._get_GA_coefs(s_dist_features, t_dist_features)
+        GAD_loss = torch.mean(torch.mul(dist_losses, GA_coefs))
+
+        # Print loss - coefficient pairs
+        loss_coef_pairs = list(zip(dist_losses.cpu().detach().numpy(), GA_coefs.cpu().detach().numpy()))
+        print(loss_coef_pairs)
+
+        return GAD_loss
 
     def get_loss_and_backward(self, batch):
         input_var, target_var = batch
@@ -202,7 +220,7 @@ class PGADModelTrainer(Trainer):
         total_loss = pred_loss + GAD_loss * self.args.gad_factor
         total_loss.backward()
 
-        if 'hard' in self.args.prune_mode:
+        if self.do_hard_prune:
             self.zeroize_pruned_weights_grad()
 
         # Get performance metrics
@@ -236,14 +254,14 @@ def main():
         train_loader, eval_loader = DataLoader.get_cifar100(args.batch_size)  # get data loader
         num_classes = 100
     else:
-        raise ValueError
+        raise NameError
     if args.model == 'alexnet':
         t_model = alexnet(num_classes=num_classes)
         s_model = alexnet(num_classes=num_classes)
-        load_model(t_model, args.t_load_model_path, device)
-        load_model(s_model, args.s_load_model_path, device)
     else:
-        raise ValueError
+        raise NameError
+    load_model(t_model, args.t_load_model_path, device)
+    load_model(s_model, args.s_load_model_path, device)
     optimizer = optim.SGD(s_model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
     base_trainer_cfg = (args, s_model, train_loader, eval_loader, optimizer, args.save_dir, device)
     writer = SummaryWriter(log_dir=args.log_dir)  # for tensorboardX
