@@ -5,18 +5,14 @@ from torch.nn.modules.module import Module
 from util import z_score_v2, min_max_scalar
 
 
-class FilterPruningModule(Module):
+class FiltersPruningModule(Module):
     def __init__(self):
-        super(FilterPruningModule, self).__init__()
-        self.name_to_prune_indices = dict()
-        self.name_to_left_indices = dict()
+        super(FiltersPruningModule, self).__init__()
 
     @staticmethod
     def _get_prune_indices(conv_module, prune_rates, mode='filter-norm'):
         f_w = conv_module.weight.data.cpu().numpy()  # The weight of filters
         f_g = conv_module.weight.grad.cpu().numpy()  # The gradient of filters
-        sum_of_objs = None
-        num_of_objs = None
         if 'filter-norm' in mode:
             sum_of_objs = np.sum(np.abs(f_w.reshape(f_w.shape[0], -1)), 1)
             num_of_objs = f_w.shape[0]
@@ -68,6 +64,8 @@ class FilterPruningModule(Module):
             flat_f_g = f_g.reshape(f_g.shape[0], -1)
             sum_of_objs = min_max_scalar(np.sum(np.abs(flat_f_w), 1)) + min_max_scalar(np.sum(np.abs(flat_f_g), 1))
             num_of_objs = f_w.shape[0]
+        else:
+            raise NameError
         idx_of_objs = np.argsort(sum_of_objs)
         prune_num_of_objs = round(num_of_objs * prune_rates)
         prune_idx_of_objs = np.sort(idx_of_objs[:prune_num_of_objs])
@@ -75,15 +73,18 @@ class FilterPruningModule(Module):
         return prune_idx_of_objs
 
     @staticmethod
-    def _prune_by_indices(module, dim, indices):
+    def _prune_by_indices(module, indices, dim=0):
+        weight = module.weight.data
+        bias = module.bias.data
+        weight_dim = len(module.weight.size())
         if dim == 0:
-            if len(module.weight.size()) == 4:  # conv layer etc.
-                module.weight.data[indices, :, :, :] = 0.0
-            elif len(module.weight.size()) == 1:  # conv_bn layer etc.
-                module.weight.data[indices] = 0.0
-            module.bias.data[indices] = 0.0
+            if weight_dim == 4:  # conv layer etc.
+                weight[indices, :, :, :] = 0.0
+            elif weight_dim == 1:  # conv_bn layer etc.
+                weight[indices] = 0.0
+            bias[indices] = 0.0
         elif dim == 1:
-            module.weight.data[:, indices, :, :] = 0.0  # only happened to conv layer, so its dimension is 4
+            weight[:, indices, :, :] = 0.0  # only happened to conv layer, so its dimension is 4
 
     def _prune_by_percentile(self, layers, q=5.0):
         """
@@ -102,103 +103,77 @@ class FilterPruningModule(Module):
                 self._prune_by_threshold(module, percentile_value)
 
     def _prune_filters_or_channels(self, prune_rates, mode='filter-norm'):
+        i = 0
         dim = 0
-        conv_idx = 0
         prune_indices = None
         for name, module in self.named_modules():
             if isinstance(module, torch.nn.Conv2d):
                 if 'filter' in mode:
                     if dim == 1:
-                        self._prune_by_indices(module, dim, prune_indices)
+                        self._prune_by_indices(module, prune_indices, dim=dim)
                         dim ^= 1
-                    prune_indices = self._get_prune_indices(module, prune_rates[conv_idx], mode=mode)
-                    self._prune_by_indices(module, dim, prune_indices)
+                    prune_indices = self._get_prune_indices(module, prune_rates[i], mode=mode)
+                    self._prune_by_indices(module, prune_indices, dim=dim)
                     dim ^= 1
                 elif 'channel' in mode:
                     dim = 1
-                    prune_indices = self._get_prune_indices(module, prune_rates[conv_idx], mode=mode)
-                    self._prune_by_indices(module, dim, prune_indices)
-                conv_idx += 1
+                    prune_indices = self._get_prune_indices(module, prune_rates[i], mode=mode)
+                    self._prune_by_indices(module, prune_indices, dim=dim)
+                i += 1
             elif isinstance(module, torch.nn.BatchNorm2d):
                 if 'filter' in mode and dim == 1:
-                    self._prune_by_indices(module, 0, prune_indices)
+                    self._prune_by_indices(module, prune_indices, dim=0)
 
     def prune(self, mode, prune_rates):
         if 'percentile' in mode:
             self._prune_by_percentile(prune_rates)
         elif 'filter' in mode:
-            prune_rates = self.get_filters_prune_rates(prune_rates)
-            self._prune_filters_or_channels(prune_rates, mode=mode)
-            self.set_indices_dicts_after_pruning()
+            conv_prune_rates = self.get_conv_prune_rates(prune_rates)
+            self._prune_filters_or_channels(conv_prune_rates, mode=mode)
 
-    def get_filters_prune_rates(self, ideal_prune_rates, mode='filter', print_log=False):
+    def get_conv_prune_rates(self, ideal_prune_rates, mode='filter', verbose=False):
         """ Suppose the model prunes some filters (filters, :, :, :) or channels (:, channels, :, :). """
-        conv_idx = 0
-        prune_filter_nums = None
-        new_pruning_rates = list()
+        i = 0
+        n_act_prune_f = None  # Actual nums of prune filters
+        prune_rates = list()
         for name, module in self.named_modules():
             if isinstance(module, torch.nn.Conv2d):
-                conv_shape = module.weight.shape
-                filter_nums = conv_shape[0]
-                channel_nums = conv_shape[1]
-
-                ideal_filter_prune_rate = ideal_channel_prune_rate = ideal_prune_rates[conv_idx]
-
+                n_f, n_c = module.weight.shape[0:2]
                 # If the filter of the previous layer is prune, the channel corresponding to this layer must also be
                 # prune
                 # Suppose Conv Shape: (fn, cn, kh, kw)
-                # (1 - prune_rates) = ((fn * (1 - new_prune_rate)) * (cn - Prune_filter_nums) * kh * kw) / (fn * cn * kh
-                # * kw)
-                if conv_idx != 0:
-                    ideal_filter_prune_rate = (
-                        1 - ((1 - ideal_filter_prune_rate) * (channel_nums / (channel_nums - prune_filter_nums)))
-                    )
+                # (1 - ideal_prune_rate) = ((fn * (1 - ideal_f_prune_rate)) * (cn - n_act_prune_f) * kh * kw) / (fn
+                # * cn * kh * kw)
+                if i == 0:
+                    ideal_f_prune_rate = ideal_prune_rates[i]
+                else:
+                    ideal_f_prune_rate = 1 - ((1 - ideal_prune_rates[i]) * (n_c / (n_c - n_act_prune_f)))
+                ideal_c_prune_rate = ideal_prune_rates[i]
 
-                prune_filter_nums = round(filter_nums * ideal_filter_prune_rate)
-                actual_filter_prune_rate = prune_filter_nums / filter_nums
-                filter_bias = abs(actual_filter_prune_rate - ideal_filter_prune_rate)
+                n_act_prune_f = round(n_f * ideal_f_prune_rate)
+                act_f_prune_rate = n_act_prune_f / n_f
+                f_bias = abs(act_f_prune_rate - ideal_f_prune_rate)
 
-                prune_channel_nums = round(channel_nums * ideal_channel_prune_rate)
-                actual_channel_prune_rate = prune_channel_nums / channel_nums
-                channel_bias = abs(actual_channel_prune_rate - ideal_channel_prune_rate)
+                n_act_prune_c = round(n_c * ideal_c_prune_rate)
+                act_c_prune_rate = n_act_prune_c / n_c
+                c_bias = abs(act_c_prune_rate - ideal_c_prune_rate)
 
                 if mode == 'filter':
-                    if print_log:
-                        print(f'{name:6} | original filter nums: {filter_nums:4} | prune filter nums: '
-                              f'{prune_filter_nums:4} | target filter prune rate: {ideal_filter_prune_rate * 100.:.2f}'
-                              f'% | actual filter prune rate : {actual_filter_prune_rate * 100.:.2f}% | filter bias: '
-                              f'{filter_bias * 100.:.2f}%')
-                    new_pruning_rates.append(actual_filter_prune_rate)
+                    if verbose:
+                        print(f'{name:6} | original filter nums: {n_f:4} | prune filter nums: '
+                              f'{n_act_prune_f:4} | target filter prune rate: {ideal_f_prune_rate * 100.:.2f}'
+                              f'% | actual filter prune rate : {act_f_prune_rate * 100.:.2f}% | filter bias: '
+                              f'{f_bias * 100.:.2f}%')
+                    prune_rates.append(act_f_prune_rate)
                 elif mode == 'channel':
-                    if print_log:
-                        print(f'{name:6} | original channel nums: {channel_nums:4} | prune channel nums: '
-                              f'{prune_channel_nums:4} | target channel prune rate: '
-                              f'{ideal_channel_prune_rate * 100.:.2f}% | actual channel prune rate: '
-                              f'{actual_channel_prune_rate * 100.:.2f}% | channel bias: {channel_bias * 100.:.2f}%')
-                    new_pruning_rates.append(actual_channel_prune_rate)
-
-                conv_idx += 1
-
-        return new_pruning_rates
-
-    def set_indices_dicts_after_pruning(self):
-        for name, module in self.named_modules():
-            if isinstance(module, torch.nn.Conv2d):
-                conv_arr = module.weight.data.cpu().numpy()
-                perm_conv_arr = np.transpose(conv_arr, (1, 0, 2, 3))  # (fn, cn, kh, kw) => (cn, fn, kh, kw)
-
-                prune_filters_indices = np.where(
-                    np.sum(conv_arr.reshape(conv_arr.shape[0], -1), axis=1) == 0
-                )[0]
-                prune_channels_indices = np.where(
-                    np.sum(perm_conv_arr.reshape(perm_conv_arr.shape[0], -1), axis=1) == 0
-                )[0]
-
-                left_filters_indices = list(set(range(conv_arr.shape[0])).difference(prune_filters_indices))
-                left_channels_indices = list(set(range(perm_conv_arr.shape[0])).difference(prune_channels_indices))
-
-                self.name_to_prune_indices[name] = (prune_filters_indices, prune_channels_indices)
-                self.name_to_left_indices[name] = (left_filters_indices, left_channels_indices)
+                    if verbose:
+                        print(f'{name:6} | original channel nums: {n_c:4} | prune channel nums: '
+                              f'{n_act_prune_c:4} | target channel prune rate: '
+                              f'{ideal_c_prune_rate * 100.:.2f}% | actual channel prune rate: '
+                              f'{act_c_prune_rate * 100.:.2f}% | channel bias: {c_bias * 100.:.2f}%')
+                    prune_rates.append(act_c_prune_rate)
+                i += 1
+        return prune_rates
 
 
 

@@ -87,7 +87,7 @@ class PGADModelTrainer(Trainer):
         self.kl_div = nn.KLDivLoss(reduction='batchmean')  # Not sure for using "batchmean"
         self.leaky_relu = nn.LeakyReLU(negative_slope=self.args.leaky_relu_scope)
 
-        self.filter_prune_rates = self.s_model.get_filters_prune_rates(self.args.prune_rates)
+        self.filter_prune_rates = self.s_model.get_conv_prune_rates(self.args.prune_rates)
         self.t_model_with_FE = FeatureExtractor(self.t_model)
         self.s_model_with_FE = FeatureExtractor(self.s_model)
         self.last_epoch = None
