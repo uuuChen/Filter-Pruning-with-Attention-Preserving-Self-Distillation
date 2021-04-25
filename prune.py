@@ -87,7 +87,6 @@ class PGADModelTrainer(Trainer):
         self.kl_div = nn.KLDivLoss(reduction='batchmean')  # Not sure for using "batchmean"
         self.leaky_relu = nn.LeakyReLU(negative_slope=self.args.leaky_relu_scope)
 
-        self.filter_prune_rates = self.s_model.get_conv_prune_rates(self.args.prune_rates)
         self.t_model_with_FE = FeatureExtractor(self.t_model)
         self.s_model_with_FE = FeatureExtractor(self.s_model)
         self.last_epoch = None
@@ -129,12 +128,13 @@ class PGADModelTrainer(Trainer):
             dist_coefs = torch.ones(n_all_dist_layers).to(self.device) / n_all_dist_layers
         return dist_coefs
 
-    def zeroize_pruned_weights_grad(self):
-        for p in self.s_model.parameters():
-            tensor_arr = p.data.cpu().numpy()
-            ori_grad_arr = p.grad.data.cpu().numpy()
-            new_grad_arr = np.where(tensor_arr == 0, 0, ori_grad_arr)
-            p.grad.data = torch.from_numpy(new_grad_arr).to(self.device)
+    def mask_pruned_weights_grad(self):
+        conv_mask = self.s_model.conv_mask
+        for name, module in self.s_model.named_modules():
+            if name in conv_mask:
+                ori_grad_arr = module.weight.grad.data.cpu().numpy()
+                new_grad_arr = ori_grad_arr * conv_mask[name]
+                module.weight.grad.data = torch.from_numpy(new_grad_arr).to(self.device)
 
     def trans_features_for_dist(self, features_dict):
         def get_conv_attn_feature(feature):
@@ -187,6 +187,7 @@ class PGADModelTrainer(Trainer):
         return GAD_loss
 
     def get_loss_and_backward(self, batch):
+        print_nonzeros(self.s_model)
         input_var, target_var = batch
 
         # Prune the weights per "args.prune_interval"
@@ -221,7 +222,7 @@ class PGADModelTrainer(Trainer):
         total_loss.backward()
 
         if self.do_hard_prune:
-            self.zeroize_pruned_weights_grad()
+            self.mask_pruned_weights_grad()
 
         # Get performance metrics
         top1, top5 = accuracy(s_output_var, target_var, topk=(1, 5))
