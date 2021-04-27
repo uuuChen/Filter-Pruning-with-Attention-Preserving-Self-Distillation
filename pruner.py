@@ -11,67 +11,43 @@ class FiltersPruningModule(Module):
         self.conv_mask = dict()
 
     @staticmethod
-    def _get_prune_indices(conv_module, prune_rates, mode='filter-norm'):
-        f_w = conv_module.weight.data.cpu().numpy()  # The weight of filters
-        f_g = conv_module.weight.grad.cpu().numpy()  # The gradient of filters
+    def _get_prune_indices(conv_module, prune_rate, mode='filter-norm'):
+        def get_gm_dists(weights):
+            return np.array([np.sum(np.power(weights - weight, 2)) for weight in weights])
+
+        def get_l1_scores(weights_2d):
+            return np.sum(np.abs(weights_2d), axis=1)
+
+        f_weights = conv_module.weight.data.cpu().numpy()  # The weight of filters
+        f_grads = conv_module.weight.grad.cpu().numpy()  # The gradient of filters
+        f_nums = f_weights.shape[0]
+        flat_f_weights = f_weights.reshape(f_nums, -1)
+        flat_f_grads = f_grads.reshape(f_nums, -1)
         if 'filter-norm' in mode:
-            sum_of_objs = np.sum(np.abs(f_w.reshape(f_w.shape[0], -1)), 1)
-            num_of_objs = f_w.shape[0]
-        elif 'channel-norm' in mode:
-            perm_f_w = np.transpose(f_w, (1, 0, 2, 3))  # (fn, cn, kh, kw) => (cn, fn, kh, kw)
-            sum_of_objs = np.sum(np.abs(perm_f_w.reshape(perm_f_w.shape[0], -1)), 1)
-            num_of_objs = f_w.shape[1]
+            f_scores = get_l1_scores(flat_f_weights)
         elif 'filter-gm' in mode:  # Geometric-median
-            flat_f_w = f_w.reshape(f_w.shape[0], -1)
-            sum_of_objs = np.array([np.sum(np.power(flat_f_w - per_f_w, 2)) for per_f_w in flat_f_w])
-            num_of_objs = f_w.shape[0]
+            f_scores = get_gm_dists(flat_f_weights)
         elif 'filter-ggm' in mode:  # Combine gradient-base and geometric-median
-            flat_f_w = f_w.reshape(f_w.shape[0], -1)
-            _sum_of_dists = np.array([np.sum(np.power(flat_f_w - per_f_w, 2)) for per_f_w in flat_f_w])
-            _sum_of_grads = np.sum(np.abs(f_g.reshape(f_g.shape[0], -1)), 1)
-            sum_of_objs = _sum_of_dists * _sum_of_grads
-            num_of_objs = f_w.shape[0]
+            f_scores = get_gm_dists(flat_f_weights) * get_l1_scores(flat_f_grads)
         elif 'filter-ggm2' in mode:  # Combine gradient-base and geometric-median
-            flat_f_w = f_w.reshape(f_w.shape[0], -1)
-            _sum_of_dists = np.array([np.sum(np.power(flat_f_w - per_f_w, 2)) for per_f_w in flat_f_w])
-            _sum_of_grads = np.sum(np.abs(f_g.reshape(f_g.shape[0], -1)), 1)
-            sum_of_objs = _sum_of_dists + _sum_of_grads
-            num_of_objs = f_w.shape[0]
-        elif 'filter-ggm3' in mode:  # Combine norm-gradient-base and norm geometric-median
-            flat_f_w = f_w.reshape(f_w.shape[0], -1)
-            _sum_of_weights = np.sum(np.abs(f_w.reshape(f_w.shape[0], -1)), 1)
-            _sum_of_dists = np.array([np.sum(np.power(flat_f_w - per_f_w, 2)) for per_f_w in flat_f_w])
-            _sum_of_grads = np.sum(np.abs(f_g.reshape(f_g.shape[0], -1)), 1)
-            sum_of_objs = _sum_of_dists * _sum_of_grads * _sum_of_weights
-            num_of_objs = f_w.shape[0]
-        elif 'filter-nggm' in mode:  # Combine norm-gradient-base and norm geometric-median
-            flat_f_w = f_w.reshape(f_w.shape[0], -1)
-            _sum_of_dists = np.array([np.sum(np.power(flat_f_w - per_f_w, 2)) for per_f_w in flat_f_w])
-            _sum_of_grads = np.sum(np.abs(f_g.reshape(f_g.shape[0], -1)), 1)
-            sum_of_objs = min_max_scalar(_sum_of_dists) + min_max_scalar(_sum_of_grads)
-            num_of_objs = f_w.shape[0]
+            f_scores = get_gm_dists(flat_f_weights) + get_l1_scores(flat_f_grads)
+        elif 'filter-ggm3' in mode:  # Combine norm-gradient-base and norm-geometric-median
+            f_scores = get_gm_dists(flat_f_weights) * get_l1_scores(flat_f_grads) * get_l1_scores(flat_f_weights)
+        elif 'filter-nggm' in mode:  # Combine norm-gradient-base and norm-geometric-median
+            f_scores = min_max_scalar(get_gm_dists(flat_f_weights)) + min_max_scalar(get_l1_scores(flat_f_grads))
         elif 'filter-ga' in mode:  # Combine gradient-base and activation-base
-            flat_f_w = f_w.reshape(f_w.shape[0], -1)
-            flat_f_g = f_g.reshape(f_g.shape[0], -1)
-            sum_of_objs = np.sum(np.abs(flat_f_w) * np.abs(flat_f_g), 1)
-            num_of_objs = f_w.shape[0]
+            f_scores = np.sum(np.abs(flat_f_weights) * np.abs(flat_f_grads), 1)
         elif 'filter-nga' in mode:  # Combine norm-gradient-base and norm-activation-base
-            flat_f_w = f_w.reshape(f_w.shape[0], -1)
-            flat_f_g = f_g.reshape(f_g.shape[0], -1)
-            sum_of_objs = np.sum(min_max_scalar(np.abs(flat_f_w)) + min_max_scalar(np.abs(flat_f_g)), 1)
-            num_of_objs = f_w.shape[0]
+            f_scores = np.sum(min_max_scalar(np.abs(flat_f_weights)) + min_max_scalar(np.abs(flat_f_grads)), 1)
         elif 'filter-nga2' in mode:  # Combine norm-gradient-base and norm-activation-base
-            flat_f_w = f_w.reshape(f_w.shape[0], -1)
-            flat_f_g = f_g.reshape(f_g.shape[0], -1)
-            sum_of_objs = min_max_scalar(np.sum(np.abs(flat_f_w), 1)) + min_max_scalar(np.sum(np.abs(flat_f_g), 1))
-            num_of_objs = f_w.shape[0]
+            f_scores = min_max_scalar(get_l1_scores(flat_f_weights)) + min_max_scalar(get_l1_scores(flat_f_grads))
         else:
             raise NameError
-        idx_of_objs = np.argsort(sum_of_objs)
-        prune_num_of_objs = round(num_of_objs * prune_rates)
-        prune_idx_of_objs = np.sort(idx_of_objs[:prune_num_of_objs])
-        print(prune_idx_of_objs)
-        return prune_idx_of_objs
+        rank_f_indices = np.argsort(f_scores)
+        prune_f_nums = round(f_nums * prune_rate)
+        prune_f_indices = np.sort(rank_f_indices[:prune_f_nums])
+        print(prune_f_indices)
+        return prune_f_indices
 
     @staticmethod
     def _prune_by_indices(module, indices, dim=0):

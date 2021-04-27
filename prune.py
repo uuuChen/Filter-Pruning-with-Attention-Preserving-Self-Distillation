@@ -115,17 +115,17 @@ class PGADModelTrainer(Trainer):
             n_grad_dist_layers = get_n_grad_dist_layers(self.cur_epoch, self.args.n_epochs, n_all_dist_layers)
             grad_dist_features_pair = list(zip(s_dist_features, t_dist_features))[:n_grad_dist_layers]
             attn_scores = get_attn_scores(grad_dist_features_pair)
-            dist_coefs = torch.zeros(n_all_dist_layers).to(self.device)
+            dist_coefs = torch.zeros(n_all_dist_layers, dtype=torch.float64).to(self.device)
             dist_coefs[:n_grad_dist_layers] = attn_scores
         elif self.do_attn_dist:
             all_dist_features_pair = list(zip(s_dist_features, t_dist_features))
             dist_coefs = get_attn_scores(all_dist_features_pair)
         elif self.do_grad_dist:
             n_grad_dist_layers = get_n_grad_dist_layers(self.cur_epoch, self.args.n_epochs, n_all_dist_layers)
-            dist_coefs = torch.zeros(n_all_dist_layers).to(self.device)
+            dist_coefs = torch.zeros(n_all_dist_layers, dtype=torch.float64).to(self.device)
             dist_coefs[:n_grad_dist_layers] = 1 / n_grad_dist_layers
         else:
-            dist_coefs = torch.ones(n_all_dist_layers).to(self.device) / n_all_dist_layers
+            dist_coefs = torch.ones(n_all_dist_layers, dtype=torch.float64).to(self.device) / n_all_dist_layers
         return dist_coefs
 
     def mask_pruned_weights_grad(self):
@@ -180,14 +180,13 @@ class PGADModelTrainer(Trainer):
         GA_coefs = self._get_GA_coefs(s_dist_features, t_dist_features)
         GAD_loss = torch.mean(torch.mul(dist_losses, GA_coefs))
 
-        # Print loss - coefficient pairs
+        # Print (loss, coefficient) pairs
         loss_coef_pairs = list(zip(dist_losses.cpu().detach().numpy(), GA_coefs.cpu().detach().numpy()))
         print(loss_coef_pairs)
 
         return GAD_loss
 
     def get_loss_and_backward(self, batch):
-        print_nonzeros(self.s_model)
         input_var, target_var = batch
 
         # Prune the weights per "args.prune_interval"
@@ -217,7 +216,7 @@ class PGADModelTrainer(Trainer):
             GAD_loss = self.get_GAD_loss(s_dist_features, t_dist_features)
         else:
             pred_loss = self.cross_entropy(s_output_var, target_var)
-            GAD_loss = torch.zeros(1).to(self.device)
+            GAD_loss = torch.zeros(1, dtype=torch.float64).to(self.device)
         total_loss = pred_loss + GAD_loss * self.args.gad_factor
         total_loss.backward()
 
@@ -272,7 +271,7 @@ def main():
         writer,
         *base_trainer_cfg
     )
-    # trainer.eval()  # Show loaded model performance as baseline
+    trainer.eval()  # Show loaded model performance as baseline
     trainer.train()
     if 'soft' in args.prune_mode:
         s_model.prune(args.prune_mode, args.prune_rates)

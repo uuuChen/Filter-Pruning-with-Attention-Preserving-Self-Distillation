@@ -8,7 +8,7 @@ class FeatureExtractor(FiltersPruningModule):
         self.model = model
         self._features = dict()
 
-        for name, child in self.model.named_children():
+        for name, child in self.model.named_modules():
             if isinstance(child, (nn.Conv2d, nn.Linear)):
                 child.register_forward_hook(self.save_outputs_hook(name))
 
