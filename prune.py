@@ -128,7 +128,21 @@ class PGADModelTrainer(Trainer):
             dist_coefs = torch.ones(n_all_dist_layers, dtype=torch.float64).to(self.device) / n_all_dist_layers
         return dist_coefs
 
-    def mask_pruned_weights_grad(self):
+    def _set_epoch_acc_weights_grad(self):
+        params = list(self.s_model.parameters())
+        acc_grads = list()
+        for i, batch in enumerate(self.train_data_iter):
+            input_var, target_var = [t.to(self.device) for t in batch]
+            output_var = self.s_model(input_var)
+            s_loss = self.cross_entropy(output_var, target_var)
+            s_loss.backward(retain_graph=True)
+            if len(acc_grads) == 0:
+                acc_grads = [torch.zeros(p.shape, dtype=torch.float64).to(self.device) for p in params]
+            acc_grads += [p.grad.abs() for p in params]
+        for p, acc_grad in zip(params, acc_grads):
+            p.grad = acc_grad
+
+    def _mask_pruned_weights_grad(self):
         conv_mask = self.s_model.conv_mask
         for name, module in self.s_model.named_modules():
             if name in conv_mask:
@@ -136,7 +150,7 @@ class PGADModelTrainer(Trainer):
                 new_grad_arr = ori_grad_arr * conv_mask[name]
                 module.weight.grad.data = torch.from_numpy(new_grad_arr).to(self.device)
 
-    def trans_features_for_dist(self, features_dict):
+    def _trans_features_for_dist(self, features_dict):
         def get_conv_attn_feature(feature):
             return F.normalize(torch.sum(torch.pow(feature, 2), dim=1).view(feature.shape[0], -1), dim=1)
 
@@ -161,7 +175,7 @@ class PGADModelTrainer(Trainer):
             dist_features.append(dist_feature)
         return dist_features
 
-    def get_GAD_loss(self, s_dist_features, t_dist_features):
+    def _get_GAD_loss(self, s_dist_features, t_dist_features):
         # Get feature loss of all distilled layers
         feature_losses = list()
         for s_feature, t_feature in zip(s_dist_features[:-1], t_dist_features[:-1]):
@@ -189,39 +203,32 @@ class PGADModelTrainer(Trainer):
     def get_loss_and_backward(self, batch):
         input_var, target_var = batch
 
-        # Prune the weights per "args.prune_interval"
+        # Prune the weights per "args.prune_interval" if it's in the "prune mode"
         if self.do_prune:
             if self.last_epoch != self.cur_epoch and self.cur_epoch % self.args.prune_interval == 0:
                 self.last_epoch = self.cur_epoch
+                self._set_epoch_acc_weights_grad()  # Set the accumulated gradients and use them during "model.prune()"
+                self.s_model.prune(self.args.prune_mode, self.args.prune_rates)  # Prune the weights by "args.prune_
+                # mode"
 
-                # In order to get the gradient and use it on the criterion "filter-ga"
-                s_output_var = self.s_model(input_var)
-                s_loss = self.cross_entropy(s_output_var, target_var)
-                s_loss.backward(retain_graph=True)
-
-                # Prune the weights by "args.prune_mode"
-                self.s_model.prune(self.args.prune_mode, self.args.prune_rates)
-
-        # ---------------------------------------------
-        # 1. Do the gradually self-distillation combined with attention mechanism
-        # 2. Get loss and do backward, and then set the gradient of the pruned weights to 0 if it's in the "hard"
-        #    prune mode
-        # ---------------------------------------------
+        # Do different kinds of distillation according to "dist_mode" if "do_dist", otherwise do general
+        # training
         s_output_var, s_features_dict = self.s_model_with_FE(input_var)
         t_output_var, t_features_dict = self.t_model_with_FE(input_var)
         if self.do_dist:
-            s_dist_features = self.trans_features_for_dist(s_features_dict)
-            t_dist_features = self.trans_features_for_dist(t_features_dict)
+            s_dist_features = self._trans_features_for_dist(s_features_dict)
+            t_dist_features = self._trans_features_for_dist(t_features_dict)
             pred_loss = self.cross_entropy(s_output_var, target_var)
-            GAD_loss = self.get_GAD_loss(s_dist_features, t_dist_features)
+            GAD_loss = self._get_GAD_loss(s_dist_features, t_dist_features)
         else:
             pred_loss = self.cross_entropy(s_output_var, target_var)
             GAD_loss = torch.zeros(1, dtype=torch.float64).to(self.device)
         total_loss = pred_loss + GAD_loss * self.args.gad_factor
         total_loss.backward()
 
+        # Set the gradient of the pruned weights to 0 if it's in the "hard prune mode"
         if self.do_hard_prune:
-            self.mask_pruned_weights_grad()
+            self._mask_pruned_weights_grad()
 
         # Get performance metrics
         top1, top5 = accuracy(s_output_var, target_var, topk=(1, 5))
