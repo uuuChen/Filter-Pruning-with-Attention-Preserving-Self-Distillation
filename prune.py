@@ -3,6 +3,7 @@ import os
 import sys
 import numpy as np
 import math
+from tqdm import tqdm
 
 from util import (
     check_dirs_exist,
@@ -130,17 +131,19 @@ class PGADModelTrainer(Trainer):
 
     def _set_epoch_acc_weights_grad(self):
         params = list(self.s_model.parameters())
-        acc_grads = list()
-        for i, batch in enumerate(self.train_data_iter):
+        acc_grads = None
+        iter_bar = tqdm(self.train_data_iter)
+        for i, batch in enumerate(iter_bar):
             input_var, target_var = [t.to(self.device) for t in batch]
             output_var = self.s_model(input_var)
             s_loss = self.cross_entropy(output_var, target_var)
-            s_loss.backward(retain_graph=True)
-            if len(acc_grads) == 0:
-                acc_grads = [torch.zeros(p.shape, dtype=torch.float64).to(self.device) for p in params]
-            acc_grads += [p.grad.abs() for p in params]
+            s_loss.backward()
+            if acc_grads is None:
+                acc_grads = np.array([np.zeros(p.shape) for p in params], dtype=object)
+            acc_grads += np.array([p.grad.abs().cpu().numpy() for p in params], dtype=object)
+        acc_grads /= len(iter_bar)
         for p, acc_grad in zip(params, acc_grads):
-            p.grad = acc_grad
+            p.grad.data = torch.from_numpy(acc_grad).to(self.device)
 
     def _mask_pruned_weights_grad(self):
         conv_mask = self.s_model.conv_mask
@@ -196,7 +199,7 @@ class PGADModelTrainer(Trainer):
 
         # Print (loss, coefficient) pairs
         loss_coef_pairs = list(zip(dist_losses.cpu().detach().numpy(), GA_coefs.cpu().detach().numpy()))
-        print(loss_coef_pairs)
+        print(f'Epoch {self.cur_epoch} :', loss_coef_pairs)
 
         return GAD_loss
 

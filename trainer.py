@@ -3,7 +3,9 @@ import json
 import numpy as np
 from tqdm import tqdm
 from abc import abstractmethod
+
 from util import get_average_meters, save_model
+
 import torch
 
 
