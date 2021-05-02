@@ -61,7 +61,7 @@ class Trainer(object):
             e_result_vals += b_result_vals
             iter_bar.set_description('Iter')
         e_result_dict = dict(zip(b_result_dict.keys(), e_result_vals/len(iter_bar)))
-        print(e_result_dict)
+        print(f'Epoch {self.cur_epoch} :',  e_result_dict)
         return e_result_dict
 
     @abstractmethod

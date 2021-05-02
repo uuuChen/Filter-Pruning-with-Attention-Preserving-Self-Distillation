@@ -135,12 +135,15 @@ class PGADModelTrainer(Trainer):
         iter_bar = tqdm(self.train_data_iter)
         for i, batch in enumerate(iter_bar):
             input_var, target_var = [t.to(self.device) for t in batch]
+            self.optimizer.zero_grad()
             output_var = self.s_model(input_var)
-            s_loss = self.cross_entropy(output_var, target_var)
-            s_loss.backward()
+            loss = self.cross_entropy(output_var, target_var)
+            loss.backward()
             if acc_grads is None:
-                acc_grads = np.array([np.zeros(p.shape) for p in params], dtype=object)
+                acc_grads = np.array([np.zeros(p.grad.shape) for p in params], dtype=object)
             acc_grads += np.array([p.grad.abs().cpu().numpy() for p in params], dtype=object)
+            if i == 0:
+                break
         acc_grads /= len(iter_bar)
         for p, acc_grad in zip(params, acc_grads):
             p.grad.data = torch.from_numpy(acc_grad).to(self.device)
@@ -195,11 +198,11 @@ class PGADModelTrainer(Trainer):
         # Combine feature losses and soft logit loss with attention coefficients
         dist_losses = torch.cat((feature_losses, soft_logit_loss.view(1)), dim=0)
         GA_coefs = self._get_GA_coefs(s_dist_features, t_dist_features)
-        GAD_loss = torch.mean(torch.mul(dist_losses, GA_coefs))
+        GAD_loss = torch.mean(dist_losses * GA_coefs)
 
         # Print (loss, coefficient) pairs
         loss_coef_pairs = list(zip(dist_losses.cpu().detach().numpy(), GA_coefs.cpu().detach().numpy()))
-        print(f'Epoch {self.cur_epoch} :', loss_coef_pairs)
+        print(loss_coef_pairs)
 
         return GAD_loss
 
@@ -211,8 +214,8 @@ class PGADModelTrainer(Trainer):
             if self.last_epoch != self.cur_epoch and self.cur_epoch % self.args.prune_interval == 0:
                 self.last_epoch = self.cur_epoch
                 self._set_epoch_acc_weights_grad()  # Set the accumulated gradients and use them during "model.prune()"
-                self.s_model.prune(self.args.prune_mode, self.args.prune_rates)  # Prune the weights by "args.prune_
-                # mode"
+                self.s_model.prune(self.args.prune_mode, self.args.prune_rates)
+                self.optimizer.zero_grad()
 
         # Do different kinds of distillation according to "dist_mode" if "do_dist", otherwise do general
         # training

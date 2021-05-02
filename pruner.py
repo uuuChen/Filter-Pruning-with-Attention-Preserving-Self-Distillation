@@ -19,7 +19,7 @@ class FiltersPruningModule(Module):
             return np.sum(np.abs(weights_2d), axis=1)
 
         f_weights = conv_module.weight.data.cpu().numpy()  # The weight of filters
-        f_grads = conv_module.weight.grad.cpu().numpy()  # The gradient of filters
+        f_grads = conv_module.weight.grad.data.cpu().numpy()  # The gradient of filters
         f_nums = f_weights.shape[0]
         flat_f_weights = f_weights.reshape(f_nums, -1)
         flat_f_grads = f_grads.reshape(f_nums, -1)
