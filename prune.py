@@ -165,19 +165,20 @@ class PGADModelTrainer(Trainer):
 
         dist_features = list()
         for i, (name, feature) in enumerate(features_dict.items(), start=1):
-            if 'conv' in name and not self.do_fc_dist:
-                if self.args.dist_method == 'attn-feature':
-                    dist_feature = get_conv_attn_feature(feature)
-                elif self.args.dist_method == 'flat-feature':
-                    dist_feature = get_conv_flat_feature(feature)
+            if i != len(features_dict):
+                if 'conv' in name and not self.do_fc_dist:
+                    if self.args.dist_method == 'attn-feature':
+                        dist_feature = get_conv_attn_feature(feature)
+                    elif self.args.dist_method == 'flat-feature':
+                        dist_feature = get_conv_flat_feature(feature)
+                    else:
+                        raise NameError
+                elif 'fc' in name and not self.do_conv_dist:
+                    dist_feature = feature
                 else:
-                    raise NameError
-            elif 'fc' in name and not self.do_conv_dist:
-                dist_feature = feature
-            elif i == len(features_dict):  # The Layer which outputs logits
-                dist_feature = feature
+                    continue
             else:
-                continue
+                dist_feature = feature
             dist_features.append(dist_feature)
         return dist_features
 

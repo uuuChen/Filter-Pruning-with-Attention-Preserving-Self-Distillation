@@ -98,14 +98,7 @@ class FiltersPruningModule(Module):
                 if 'filter' in mode and dim == 1:
                     self._prune_by_indices(module, prune_indices, dim=0)
 
-    def prune(self, mode, ideal_prune_rates):
-        if 'percentile' in mode:
-            self._prune_by_percentile(ideal_prune_rates)
-        elif 'filter' in mode:
-            act_prune_rates = self.get_conv_act_prune_rates(ideal_prune_rates)
-            self._prune_filters_and_channels(act_prune_rates, mode=mode)
-
-    def get_conv_act_prune_rates(self, ideal_prune_rates, verbose=False):
+    def _get_conv_act_prune_rates(self, ideal_prune_rates, verbose=False):
         """ Suppose the model prunes some filters (filters, :, :, :). """
         i = 0
         n_prune_filters = None
@@ -128,7 +121,7 @@ class FiltersPruningModule(Module):
                     ideal_f_prune_rate = ideal_prune_rates[i]
                 else:
                     ideal_f_prune_rate = (
-                        1 - ((1 - ideal_prune_rates[i]) * (n_channels / (n_channels - n_prune_filters)))
+                            1 - ((1 - ideal_prune_rates[i]) * (n_channels / (n_channels - n_prune_filters)))
                     )
                 n_prune_filters = round(n_filters * ideal_f_prune_rate)
                 act_f_prune_rate = n_prune_filters / n_filters
@@ -141,6 +134,13 @@ class FiltersPruningModule(Module):
                           f'% | actual filter prune rate : {act_f_prune_rate * 100.:.2f}% | filter bias: '
                           f'{f_bias * 100.:.2f}%')
         return prune_rates
+
+    def prune(self, mode, ideal_prune_rates):
+        if 'percentile' in mode:
+            self._prune_by_percentile(ideal_prune_rates)
+        elif 'filter' in mode:
+            act_prune_rates = self._get_conv_act_prune_rates(ideal_prune_rates)
+            self._prune_filters_and_channels(act_prune_rates, mode=mode)
 
 
 
