@@ -4,6 +4,7 @@ import sys
 import numpy as np
 import math
 from tqdm import tqdm
+import copy
 
 from util import (
     check_dirs_exist,
@@ -129,6 +130,33 @@ class PGADModelTrainer(Trainer):
             dist_coefs = torch.ones(n_all_dist_layers, dtype=torch.float64).to(self.device) / n_all_dist_layers
         return dist_coefs
 
+    # def _set_epoch_acc_weights_grad(self):
+    #     acc_grads = None
+    #     iter_bar = tqdm(self.train_data_iter)
+    #     temp_model = copy.deepcopy(self.s_model)
+    #     temp_optim = optim.SGD(
+    #         temp_model.parameters(), lr=self.args.lr, momentum=self.args.momentum, weight_decay=self.args.weight_decay
+    #     )
+    #     ori_params = list(self.s_model.parameters())
+    #     temp_params = list(temp_model.parameters())
+    #     for i, batch in enumerate(iter_bar):
+    #         input_var, target_var = [t.to(self.device) for t in batch]
+    #         temp_optim.zero_grad()
+    #         output_var = temp_model(input_var)
+    #         loss = self.cross_entropy(output_var, target_var)
+    #         loss.backward()
+    #         if i == 0:
+    #             output_var = self.s_model(input_var)
+    #             _loss = self.cross_entropy(output_var, target_var)
+    #             _loss.backward()
+    #         if acc_grads is None:
+    #             acc_grads = np.array([np.zeros(p.grad.shape) for p in temp_params], dtype=object)
+    #         acc_grads += np.array([p.grad.abs().cpu().numpy() for p in temp_params], dtype=object)
+    #         temp_optim.step()
+    #     acc_grads /= len(iter_bar)
+    #     for p, acc_grad in zip(ori_params, acc_grads):
+    #         p.grad.data = torch.from_numpy(acc_grad).to(self.device)
+
     def _set_epoch_acc_weights_grad(self):
         params = list(self.s_model.parameters())
         acc_grads = None
@@ -140,13 +168,14 @@ class PGADModelTrainer(Trainer):
             loss = self.cross_entropy(output_var, target_var)
             loss.backward()
             if acc_grads is None:
-                acc_grads = np.array([np.zeros(p.grad.shape) for p in params], dtype=object)
-            acc_grads += np.array([p.grad.abs().cpu().numpy() for p in params], dtype=object)
-            if i == 0:
-                break
+                acc_grads = np.array(
+                    [torch.zeros(p.grad.shape, dtype=torch.float64).to(self.device) for p in params],
+                    dtype=object
+                )
+            acc_grads += np.array([p.grad for p in params], dtype=object)
         acc_grads /= len(iter_bar)
         for p, acc_grad in zip(params, acc_grads):
-            p.grad.data = torch.from_numpy(acc_grad).to(self.device)
+            p.grad.data = acc_grad
 
     def _mask_pruned_weights_grad(self):
         conv_mask = self.s_model.conv_mask
@@ -160,7 +189,7 @@ class PGADModelTrainer(Trainer):
         def get_conv_attn_feature(feature):
             return F.normalize(torch.sum(torch.pow(feature, 2), dim=1).view(feature.shape[0], -1), dim=1)
 
-        def get_conv_flat_feature(feature):
+        def get_flat_norm_feature(feature):
             return F.normalize(feature.view(feature.shape[0], -1), dim=1)
 
         dist_features = list()
@@ -170,7 +199,7 @@ class PGADModelTrainer(Trainer):
                     if self.args.dist_method == 'attn-feature':
                         dist_feature = get_conv_attn_feature(feature)
                     elif self.args.dist_method == 'flat-feature':
-                        dist_feature = get_conv_flat_feature(feature)
+                        dist_feature = get_flat_norm_feature(feature)
                     else:
                         raise NameError
                 elif 'fc' in name and not self.do_conv_dist:
