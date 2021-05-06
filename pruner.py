@@ -1,13 +1,21 @@
 import numpy as np
+from tqdm import tqdm
+
 import torch
-from torch.nn.modules.module import Module
+import torch.nn as nn
 
 from util import z_score_v2, min_max_scalar
 
 
-class FiltersPruningModule(Module):
-    def __init__(self):
-        super(FiltersPruningModule, self).__init__()
+class FiltersPruner(object):
+    def __init__(self, model, optimizer, train_data_iter, device):
+        super(FiltersPruner, self).__init__()
+        self.model = model
+        self.optimizer = optimizer
+        self.train_data_iter = train_data_iter
+        self.device = device
+
+        self.cross_entropy = nn.CrossEntropyLoss()
         self.conv_mask = dict()
 
     @staticmethod
@@ -19,27 +27,30 @@ class FiltersPruningModule(Module):
             return np.sum(np.abs(weights_2d), axis=1)
 
         f_weights = conv_module.weight.data.cpu().numpy()  # The weight of filters
-        f_grads = conv_module.weight.grad.data.cpu().numpy()  # The gradient of filters
         f_nums = f_weights.shape[0]
         flat_f_weights = f_weights.reshape(f_nums, -1)
-        flat_f_grads = f_grads.reshape(f_nums, -1)
-        if 'filter-norm' in mode:
+        flat_f_grads = None
+        if '-g-' in mode:
+            f_grads = conv_module.weight.grad.data.cpu().numpy()  # The gradient of filters
+            flat_f_grads = f_grads.reshape(f_nums, -1)
+
+        if 'filter-a' in mode:
             f_scores = get_l1_scores(flat_f_weights)
         elif 'filter-gm' in mode:  # Geometric-median
             f_scores = get_gm_dists(flat_f_weights)
-        elif 'filter-ggm' in mode:  # Combine gradient-base and geometric-median
+        elif 'filter-g-gm' in mode:  # Combine gradient-base and geometric-median
             f_scores = get_gm_dists(flat_f_weights) * get_l1_scores(flat_f_grads)
-        elif 'filter-ggm2' in mode:  # Combine gradient-base and geometric-median
+        elif 'filter-g-gm-2' in mode:  # Combine gradient-base and geometric-median
             f_scores = get_gm_dists(flat_f_weights) + get_l1_scores(flat_f_grads)
-        elif 'filter-ggm3' in mode:  # Combine norm-gradient-base and norm-geometric-median
+        elif 'filter-g-gm-3' in mode:  # Combine norm-gradient-base and norm-geometric-median
             f_scores = get_gm_dists(flat_f_weights) * get_l1_scores(flat_f_grads) * get_l1_scores(flat_f_weights)
-        elif 'filter-nggm' in mode:  # Combine norm-gradient-base and norm-geometric-median
+        elif 'filter-n-g-gm' in mode:  # Combine norm-gradient-base and norm-geometric-median
             f_scores = min_max_scalar(get_gm_dists(flat_f_weights)) + min_max_scalar(get_l1_scores(flat_f_grads))
-        elif 'filter-ga' in mode:  # Combine gradient-base and activation-base
+        elif 'filter-g-a' in mode:  # Combine gradient-base and activation-base
             f_scores = np.sum(np.abs(flat_f_weights) * np.abs(flat_f_grads), 1)
-        elif 'filter-nga' in mode:  # Combine norm-gradient-base and norm-activation-base
+        elif 'filter-n-g-a' in mode:  # Combine norm-gradient-base and norm-activation-base
             f_scores = np.sum(min_max_scalar(np.abs(flat_f_weights)) + min_max_scalar(np.abs(flat_f_grads)), 1)
-        elif 'filter-nga2' in mode:  # Combine norm-gradient-base and norm-activation-base
+        elif 'filter-n-g-a-2' in mode:  # Combine norm-gradient-base and norm-activation-base
             f_scores = min_max_scalar(get_l1_scores(flat_f_weights)) + min_max_scalar(get_l1_scores(flat_f_grads))
         else:
             raise NameError
@@ -59,8 +70,15 @@ class FiltersPruningModule(Module):
         elif dim == 1:
             weight[:, indices] = 0.0
 
+    @staticmethod
+    def _prune_by_threshold(module, threshold):
+        device = module.weight.device
+        tensor = module.weight.data.cpu().numpy()
+        mask = np.where(abs(tensor) < threshold, 0, 1)
+        module.weight.data = torch.from_numpy(tensor * mask).to(device)
+
     def _prune_by_percentile(self, layers, q=5.0):
-        for name, module in self.named_modules():
+        for name, module in self.model.named_modules():
             if name in layers:
                 tensor = module.weight.data.cpu().numpy()
                 alive = tensor[np.nonzero(tensor)]  # flattened array of nonzero values
@@ -78,11 +96,34 @@ class FiltersPruningModule(Module):
         elif dim == 1:
             mask_arr[:, prune_indices] = 0
 
+    def _set_epoch_acc_weights_grad(self):
+        params = list(self.model.parameters())
+        acc_grads = None
+        iter_bar = tqdm(self.train_data_iter)
+        for i, batch in enumerate(iter_bar):
+            input_var, target_var = [t.to(self.device) for t in batch]
+            self.optimizer.zero_grad()
+            output_var = self.model(input_var)
+            loss = self.cross_entropy(output_var, target_var)
+            loss.backward()
+            if acc_grads is None:
+                acc_grads = np.array(
+                    [torch.zeros(p.grad.shape, dtype=torch.float64).to(self.device) for p in params],
+                    dtype=object
+                )
+            acc_grads += np.array([p.grad for p in params], dtype=object)
+        acc_grads /= len(iter_bar)
+        for p, acc_grad in zip(params, acc_grads):
+            p.grad.data = acc_grad
+
     def _prune_filters_and_channels(self, prune_rates, mode='hard-filter-norm'):
         i = 0
         dim = 0
         prune_indices = None
-        for name, module in self.named_modules():
+        use_grad = '-g-' in mode
+        if use_grad:
+            self._set_epoch_acc_weights_grad()
+        for name, module in self.model.named_modules():
             if isinstance(module, torch.nn.Conv2d):
                 self._init_conv_mask(name, module)
                 if dim == 1:
@@ -97,13 +138,15 @@ class FiltersPruningModule(Module):
             elif isinstance(module, torch.nn.BatchNorm2d):
                 if 'filter' in mode and dim == 1:
                     self._prune_by_indices(module, prune_indices, dim=0)
+        if use_grad:
+            self.optimizer.zero_grad()
 
     def _get_conv_act_prune_rates(self, ideal_prune_rates, verbose=False):
         """ Suppose the model prunes some filters (filters, :, :, :). """
         i = 0
         n_prune_filters = None
         prune_rates = list()
-        for name, module in self.named_modules():
+        for name, module in self.model.named_modules():
             if isinstance(module, torch.nn.Conv2d):
                 n_filters, n_channels = module.weight.shape[0:2]
                 # ---------------------------------------------
@@ -141,6 +184,7 @@ class FiltersPruningModule(Module):
         elif 'filter' in mode:
             act_prune_rates = self._get_conv_act_prune_rates(ideal_prune_rates)
             self._prune_filters_and_channels(act_prune_rates, mode=mode)
+
 
 
 

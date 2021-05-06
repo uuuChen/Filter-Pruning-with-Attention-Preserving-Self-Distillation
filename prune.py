@@ -20,6 +20,7 @@ from data_loader import DataLoader
 from models.alexnet import alexnet
 from models.feature_extractor import FeatureExtractor
 from trainer import Trainer
+from pruner import FiltersPruner
 
 from tensorboardX import SummaryWriter
 import torch
@@ -91,6 +92,7 @@ class PGADModelTrainer(Trainer):
 
         self.t_model_with_FE = FeatureExtractor(self.t_model)
         self.s_model_with_FE = FeatureExtractor(self.s_model)
+        self.s_model_pruner = FiltersPruner(self.s_model, self.optimizer, self.train_data_iter, self.device)
         self.last_epoch = None
         self.init_adapt_layers = False
 
@@ -130,55 +132,8 @@ class PGADModelTrainer(Trainer):
             dist_coefs = torch.ones(n_all_dist_layers, dtype=torch.float64).to(self.device) / n_all_dist_layers
         return dist_coefs
 
-    # def _set_epoch_acc_weights_grad(self):
-    #     acc_grads = None
-    #     iter_bar = tqdm(self.train_data_iter)
-    #     temp_model = copy.deepcopy(self.s_model)
-    #     temp_optim = optim.SGD(
-    #         temp_model.parameters(), lr=self.args.lr, momentum=self.args.momentum, weight_decay=self.args.weight_decay
-    #     )
-    #     ori_params = list(self.s_model.parameters())
-    #     temp_params = list(temp_model.parameters())
-    #     for i, batch in enumerate(iter_bar):
-    #         input_var, target_var = [t.to(self.device) for t in batch]
-    #         temp_optim.zero_grad()
-    #         output_var = temp_model(input_var)
-    #         loss = self.cross_entropy(output_var, target_var)
-    #         loss.backward()
-    #         if i == 0:
-    #             output_var = self.s_model(input_var)
-    #             _loss = self.cross_entropy(output_var, target_var)
-    #             _loss.backward()
-    #         if acc_grads is None:
-    #             acc_grads = np.array([np.zeros(p.grad.shape) for p in temp_params], dtype=object)
-    #         acc_grads += np.array([p.grad.abs().cpu().numpy() for p in temp_params], dtype=object)
-    #         temp_optim.step()
-    #     acc_grads /= len(iter_bar)
-    #     for p, acc_grad in zip(ori_params, acc_grads):
-    #         p.grad.data = torch.from_numpy(acc_grad).to(self.device)
-
-    def _set_epoch_acc_weights_grad(self):
-        params = list(self.s_model.parameters())
-        acc_grads = None
-        iter_bar = tqdm(self.train_data_iter)
-        for i, batch in enumerate(iter_bar):
-            input_var, target_var = [t.to(self.device) for t in batch]
-            self.optimizer.zero_grad()
-            output_var = self.s_model(input_var)
-            loss = self.cross_entropy(output_var, target_var)
-            loss.backward()
-            if acc_grads is None:
-                acc_grads = np.array(
-                    [torch.zeros(p.grad.shape, dtype=torch.float64).to(self.device) for p in params],
-                    dtype=object
-                )
-            acc_grads += np.array([p.grad for p in params], dtype=object)
-        acc_grads /= len(iter_bar)
-        for p, acc_grad in zip(params, acc_grads):
-            p.grad.data = acc_grad
-
     def _mask_pruned_weights_grad(self):
-        conv_mask = self.s_model.conv_mask
+        conv_mask = self.s_model_pruner.conv_mask
         for name, module in self.s_model.named_modules():
             if name in conv_mask:
                 ori_grad_arr = module.weight.grad.data.cpu().numpy()
@@ -243,9 +198,7 @@ class PGADModelTrainer(Trainer):
         if self.do_prune:
             if self.last_epoch != self.cur_epoch and self.cur_epoch % self.args.prune_interval == 0:
                 self.last_epoch = self.cur_epoch
-                self._set_epoch_acc_weights_grad()  # Set the accumulated gradients and use them during "model.prune()"
-                self.s_model.prune(self.args.prune_mode, self.args.prune_rates)
-                self.optimizer.zero_grad()
+                self.s_model_pruner.prune(self.args.prune_mode, self.args.prune_rates)
 
         # Do different kinds of distillation according to "dist_mode" if "do_dist", otherwise do general
         # training

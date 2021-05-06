@@ -1,8 +1,7 @@
 import torch.nn as nn
-from pruner import FiltersPruningModule
 
 
-class FeatureExtractor(FiltersPruningModule):
+class FeatureExtractor(nn.Module):
     def __init__(self, model):
         super().__init__()
         self.model = model
