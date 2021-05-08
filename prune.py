@@ -46,7 +46,7 @@ parser.add_argument('--prune-rates', nargs='+', type=float, default=[0.16, 0.62,
 parser.add_argument('--prune-interval', type=int, default=sys.maxsize)  # By default we will only prune once
 parser.add_argument('--dist-mode', type=str, default='None')  # pattern: "((all|conv|fc)(-attn)?(-grad)?-dist|None)"
 parser.add_argument('--dist-method', type=str, default='attn-feature')
-parser.add_argument('--dist-temperature', type=float, default=1.0)
+parser.add_argument('--dist-temperature', type=float, default=2.5)
 parser.add_argument('--gad-factor', type=float, default=50.0)
 parser.add_argument('--t-load-model-path', type=str, default='None')
 parser.add_argument('--s-load-model-path', type=str, default='None')

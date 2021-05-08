@@ -38,14 +38,19 @@ class FiltersPruner(object):
             f_scores = get_l1_scores(flat_f_weights)
         elif 'filter-gm' in mode:  # Geometric-median
             f_scores = get_gm_dists(flat_f_weights)
-        elif 'filter-g-gm' in mode:  # Combine gradient-base and geometric-median
+        elif 'filter-g-gm-1' in mode:  # Combine gradient-base and geometric-median
             f_scores = get_gm_dists(flat_f_weights) * get_l1_scores(flat_f_grads)
         elif 'filter-g-gm-2' in mode:  # Combine gradient-base and geometric-median
             f_scores = get_gm_dists(flat_f_weights) + get_l1_scores(flat_f_grads)
         elif 'filter-g-gm-3' in mode:  # Combine norm-gradient-base and norm-geometric-median
             f_scores = get_gm_dists(flat_f_weights) * get_l1_scores(flat_f_grads) * get_l1_scores(flat_f_weights)
-        elif 'filter-n-g-gm' in mode:  # Combine norm-gradient-base and norm-geometric-median
+        elif 'filter-n-g-gm-1' in mode:  # Combine norm-gradient-base and norm-geometric-median
             f_scores = min_max_scalar(get_gm_dists(flat_f_weights)) + min_max_scalar(get_l1_scores(flat_f_grads))
+        elif 'filter-n-g-gm-2' in mode:
+            f_scores = (min_max_scalar(get_gm_dists(flat_f_weights)) + min_max_scalar(get_l1_scores(flat_f_grads)) +
+                        min_max_scalar(get_l1_scores(flat_f_weights)))
+        elif 'filter-n-g-gm-3' in mode:  # Combine norm-gradient-base and norm-geometric-median
+            f_scores = min_max_scalar(get_gm_dists(flat_f_weights)) * min_max_scalar(get_l1_scores(flat_f_grads))
         elif 'filter-g-a' in mode:  # Combine gradient-base and activation-base
             f_scores = np.sum(np.abs(flat_f_weights) * np.abs(flat_f_grads), 1)
         elif 'filter-n-g-a' in mode:  # Combine norm-gradient-base and norm-activation-base
@@ -57,7 +62,7 @@ class FiltersPruner(object):
         rank_f_indices = np.argsort(f_scores)
         prune_f_nums = round(f_nums * prune_rate)
         prune_f_indices = np.sort(rank_f_indices[:prune_f_nums])
-        print(prune_f_indices)
+        print(rank_f_indices[:prune_f_nums])
         return prune_f_indices
 
     @staticmethod
