@@ -1,12 +1,9 @@
 import argparse
 import os
 import sys
-import numpy as np
 import math
-from tqdm import tqdm
-import copy
 
-from util import (
+from helpers.utils import (
     check_dirs_exist,
     get_device,
     accuracy,
@@ -16,11 +13,11 @@ from util import (
     set_seeds,
     log_to_file
 )
-from data_loader import DataLoader
-from models.alexnet import alexnet
-from models.feature_extractor import FeatureExtractor
-from trainer import Trainer
-from pruner import FiltersPruner
+from helpers import data_loader
+import models
+from helpers.feature_extractor import FeatureExtractor
+from helpers.trainer import Trainer
+from helpers.pruner import FiltersPruner
 
 from tensorboardX import SummaryWriter
 import torch
@@ -33,17 +30,18 @@ parser = argparse.ArgumentParser(description='Prune Process')
 parser.add_argument('--n_epochs', type=int, default=200)
 parser.add_argument('--batch_size', type=int, default=256)
 parser.add_argument('--lr', type=float, default=0.01)
-parser.add_argument('--lr_drop', type=float, default=0.1)
 parser.add_argument('--seed', type=int, default=111)
 parser.add_argument('--model', type=str, default='alexnet')
 parser.add_argument('--dataset', type=str, default='cifar100')
 parser.add_argument('--schedule', type=int, nargs='+', default=[50, 100, 150])
+parser.add_argument('--lr_drops', type=float, nargs='+', default=[0.1, 0.1, 0.1])
 parser.add_argument('--momentum', type=float, default=0.9)
 parser.add_argument('--weight_decay', type=float, default=5e-4)
 parser.add_argument('--leaky_relu_scope', type=float, default=0.2)
 parser.add_argument('--prune-mode', type=str, default='None')
-parser.add_argument('--prune-rates', nargs='+', type=float, default=[0.16, 0.62, 0.65, 0.63, 0.63])
-parser.add_argument('--prune-interval', type=int, default=sys.maxsize)  # By default we will only prune once
+parser.add_argument('--prune-rates', nargs='+', type=float, default=[1.0])  # No prune by default
+parser.add_argument('--use-PFEC', action='store_true', default=False)
+parser.add_argument('--prune-interval', type=int, default=sys.maxsize)  # We will only prune once by default
 parser.add_argument('--dist-mode', type=str, default='None')  # pattern: "((all|conv|fc)(-attn)?(-grad)?-dist|None)"
 parser.add_argument('--dist-method', type=str, default='attn-feature')
 parser.add_argument('--dist-temperature', type=float, default=2.5)
@@ -92,7 +90,13 @@ class PGADModelTrainer(Trainer):
 
         self.t_model_with_FE = FeatureExtractor(self.t_model)
         self.s_model_with_FE = FeatureExtractor(self.s_model)
-        self.s_model_pruner = FiltersPruner(self.s_model, self.optimizer, self.train_data_iter, self.device)
+        self.s_model_pruner = FiltersPruner(
+            self.s_model,
+            self.optimizer,
+            self.train_data_iter,
+            self.device,
+            use_PFEC=self.args.use_PFEC
+        )
         self.last_epoch = None
         self.init_adapt_layers = False
 
@@ -148,16 +152,16 @@ class PGADModelTrainer(Trainer):
             return F.normalize(feature.view(feature.shape[0], -1), dim=1)
 
         dist_features = list()
-        for i, (name, feature) in enumerate(features_dict.items(), start=1):
+        for i, feature in enumerate(features_dict.values(), start=1):
             if i != len(features_dict):
-                if 'conv' in name and not self.do_fc_dist:
+                if len(feature.shape) == 4 and not self.do_fc_dist:  # Conv layer
                     if self.args.dist_method == 'attn-feature':
                         dist_feature = get_conv_attn_feature(feature)
                     elif self.args.dist_method == 'flat-feature':
                         dist_feature = get_flat_norm_feature(feature)
                     else:
                         raise NameError
-                elif 'fc' in name and not self.do_conv_dist:
+                elif len(feature.shape) == 2 and not self.do_conv_dist:  # Fc layer
                     dist_feature = feature
                 else:
                     continue
@@ -199,6 +203,7 @@ class PGADModelTrainer(Trainer):
             if self.last_epoch != self.cur_epoch and self.cur_epoch % self.args.prune_interval == 0:
                 self.last_epoch = self.cur_epoch
                 self.s_model_pruner.prune(self.args.prune_mode, self.args.prune_rates)
+                print_nonzeros(self.s_model)
 
         # Do different kinds of distillation according to "dist_mode" if "do_dist", otherwise do general
         # training
@@ -246,16 +251,13 @@ def main():
     check_dirs_exist([args.save_dir])
     log_to_file(str(args), args.log_file_path)
     device = get_device()
-    if args.dataset == 'cifar100':
-        train_loader, eval_loader = DataLoader.get_cifar100(args.batch_size)  # get data loader
-        num_classes = 100
-    else:
+    if args.dataset not in data_loader.__dict__:
         raise NameError
-    if args.model == 'alexnet':
-        t_model = alexnet(num_classes=num_classes)
-        s_model = alexnet(num_classes=num_classes)
-    else:
+    if args.model not in models.__dict__:
         raise NameError
+    train_loader, eval_loader, num_classes = data_loader.__dict__[args.dataset](args.batch_size)
+    t_model = models.__dict__[args.model](num_classes=num_classes)
+    s_model = models.__dict__[args.model](num_classes=num_classes)
     load_model(t_model, args.t_load_model_path, device)
     load_model(s_model, args.s_load_model_path, device)
     optimizer = optim.SGD(s_model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
@@ -267,7 +269,7 @@ def main():
         writer,
         *base_trainer_cfg
     )
-    trainer.eval()  # Show loaded model performance as baseline
+    # trainer.eval()  # Show loaded model performance as baseline
     trainer.train()
     if 'soft' in args.prune_mode:
         s_model.prune(args.prune_mode, args.prune_rates)

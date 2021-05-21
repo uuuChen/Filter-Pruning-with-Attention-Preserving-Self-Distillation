@@ -83,7 +83,8 @@ def min_max_scalar(x):
 
 def log_to_file(text, file_path):
     with open(file_path, "a") as f:
-        f.write(text)
+        f.write(f'{text}\n')
+        f.flush()
 
 
 class AverageMeter:

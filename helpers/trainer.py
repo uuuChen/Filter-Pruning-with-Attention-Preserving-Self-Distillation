@@ -1,10 +1,9 @@
 import os
-import json
 import numpy as np
 from tqdm import tqdm
 from abc import abstractmethod
 
-from util import get_average_meters, save_model
+from helpers.utils import get_average_meters, save_model
 
 import torch
 
@@ -95,7 +94,8 @@ class Trainer(object):
 
     def adjust_learning_rate(self):
         if self.cur_epoch in self.args.schedule:
-            self.cur_lr *= self.args.lr_drop
+            i = self.args.schedule.index(self.cur_epoch)
+            self.cur_lr *= self.args.lr_drops[i]
             for param_group in self.optimizer.param_groups:
                 param_group['lr'] = self.cur_lr
 

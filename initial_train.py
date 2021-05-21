@@ -1,10 +1,10 @@
 import argparse
 import os
 
-from util import check_dirs_exist, get_device, accuracy, set_seeds
-from data_loader import DataLoader
-from models.alexnet import alexnet
-from trainer import Trainer
+from helpers.utils import check_dirs_exist, get_device, accuracy, set_seeds
+from helpers import data_loader
+import models
+from helpers.trainer import Trainer
 
 from tensorboardX import SummaryWriter
 import torch.optim as optim
@@ -15,11 +15,11 @@ parser = argparse.ArgumentParser(description="Initial Train Process")
 parser.add_argument('--n_epochs', default=200, type=int)
 parser.add_argument('--batch_size', type=int, default=256)
 parser.add_argument('--lr', type=float, default=0.1)
-parser.add_argument('--lr_drop', type=float, default=0.1)
 parser.add_argument('--seed', type=int, default=111)
 parser.add_argument('--model', type=str, default='alexnet')
 parser.add_argument('--dataset', type=str, default='cifar100')
 parser.add_argument('--schedule', type=int, nargs='+', default=[50, 100, 150])
+parser.add_argument('--lr_drops', type=float, nargs='+', default=[0.1, 0.1, 0.1])
 parser.add_argument('--momentum', default=0.9, type=float)
 parser.add_argument('--weight_decay', default=5e-4, type=float)
 args = parser.parse_args()
@@ -62,18 +62,15 @@ class InitialModelTrainer(Trainer):
 def main():
     set_seeds(args.seed)
     check_dirs_exist([args.save_dir])
-    if args.dataset == 'cifar100':
-        train_loader, eval_loader = DataLoader.get_cifar100(args.batch_size)  # get data loader
-        num_classes = 100
-    else:
-        raise ValueError
-    if args.model == 'alexnet':
-        model = alexnet(num_classes=num_classes)
-    else:
-        raise ValueError
+    if args.dataset not in data_loader.__dict__:
+        raise NameError
+    if args.model not in models.__dict__:
+        raise NameError
+    train_loader, eval_loader, num_classes = data_loader.__dict__[args.dataset](args.batch_size)
+    model = models.__dict__[args.model](num_classes=num_classes)
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
     base_trainer_cfg = (args, model, train_loader, eval_loader, optimizer, args.save_dir, get_device())
-    writer = SummaryWriter(log_dir=args.log_dir)  # for tensorboardX
+    writer = SummaryWriter(log_dir=args.log_dir)  # For tensorboardX
     trainer = InitialModelTrainer(writer, *base_trainer_cfg)
     trainer.train()
 
