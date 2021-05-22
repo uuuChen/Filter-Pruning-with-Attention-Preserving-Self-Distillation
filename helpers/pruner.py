@@ -61,7 +61,7 @@ class FiltersPruner(object):
         else:
             raise NameError
         rank_f_indices = np.argsort(f_scores)
-        prune_f_nums = round(f_nums * (1.0 - prune_rate))
+        prune_f_nums = int(round(f_nums * (1.0 - prune_rate)))
         prune_f_indices = np.sort(rank_f_indices[:prune_f_nums])
         print(rank_f_indices[:prune_f_nums])
         return prune_f_indices

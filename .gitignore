@@ -1,7 +1,7 @@
 .idea/
-*__pycache__/
+*__pycache__*
 data/
 saves/
-test.py
+*test.py
 .ipynb_checkpoints/
 *.DS_Store*

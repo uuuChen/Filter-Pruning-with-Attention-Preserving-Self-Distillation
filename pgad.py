@@ -259,7 +259,13 @@ def main():
     s_model = models.__dict__[args.model](num_classes=num_classes)
     load_model(t_model, args.t_load_model_path, device)
     load_model(s_model, args.s_load_model_path, device)
-    optimizer = optim.SGD(s_model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
+    optimizer = optim.SGD(
+        s_model.parameters(),
+        lr=args.lr,
+        momentum=args.momentum,
+        weight_decay=args.weight_decay,
+        nesterov=True
+    )
     base_trainer_cfg = (args, s_model, train_loader, eval_loader, optimizer, args.save_dir, device)
     writer = SummaryWriter(log_dir=args.log_dir)  # for tensorboardX
     trainer = PGADModelTrainer(
