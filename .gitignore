@@ -4,3 +4,4 @@ data/
 saves/
 test.py
 .ipynb_checkpoints/
+*.DS_Store*

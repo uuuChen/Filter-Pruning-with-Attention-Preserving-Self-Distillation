@@ -105,13 +105,11 @@ class PGADModelTrainer(Trainer):
 
     def _get_GA_coefs(self, s_dist_features, t_dist_features):
         def get_n_grad_dist_layers(cur_epoch, n_epochs, n_all_dist_layers):
-            _n_grad_dist_layers = math.ceil(((cur_epoch + 1) / n_epochs) * n_all_dist_layers * 2)
-            n_grad_dist_layers = min(_n_grad_dist_layers, n_all_dist_layers)
-            return n_grad_dist_layers
+            return min(math.ceil(((cur_epoch + 1) / n_epochs) * n_all_dist_layers * 2), n_all_dist_layers)
 
-        def get_attn_scores(features_pair):
+        def get_attn_scores(pair_features):
             scores = list()
-            for i, (s_feature, t_feature) in enumerate(features_pair):
+            for i, (s_feature, t_feature) in enumerate(pair_features):
                 score = torch.mean(torch.abs(t_feature.detach() - s_feature.detach()))
                 scores.append(score)
             scores = torch.stack(scores, dim=0)
@@ -120,20 +118,21 @@ class PGADModelTrainer(Trainer):
 
         n_all_dist_layers = len(s_dist_features)
         if self.do_grad_dist and self.do_attn_dist:
-            n_grad_dist_layers = get_n_grad_dist_layers(self.cur_epoch, self.args.n_epochs, n_all_dist_layers)
-            grad_dist_features_pair = list(zip(s_dist_features, t_dist_features))[:n_grad_dist_layers]
-            attn_scores = get_attn_scores(grad_dist_features_pair)
+            n_dist_layers = get_n_grad_dist_layers(self.cur_epoch, self.args.n_epochs, n_all_dist_layers)
+            pair_feats = list(zip(s_dist_features, t_dist_features))[:n_dist_layers]
+            attn_scores = get_attn_scores(pair_feats)
             dist_coefs = torch.zeros(n_all_dist_layers, dtype=torch.float64).to(self.device)
-            dist_coefs[:n_grad_dist_layers] = attn_scores
+            dist_coefs[:n_dist_layers] = attn_scores
         elif self.do_attn_dist:
-            all_dist_features_pair = list(zip(s_dist_features, t_dist_features))
-            dist_coefs = get_attn_scores(all_dist_features_pair)
+            pair_feats = list(zip(s_dist_features, t_dist_features))
+            dist_coefs = get_attn_scores(pair_feats)
         elif self.do_grad_dist:
-            n_grad_dist_layers = get_n_grad_dist_layers(self.cur_epoch, self.args.n_epochs, n_all_dist_layers)
+            n_dist_layers = get_n_grad_dist_layers(self.cur_epoch, self.args.n_epochs, n_all_dist_layers)
             dist_coefs = torch.zeros(n_all_dist_layers, dtype=torch.float64).to(self.device)
-            dist_coefs[:n_grad_dist_layers] = 1 / n_grad_dist_layers
+            dist_coefs[:n_dist_layers] = 1 / n_dist_layers
         else:
-            dist_coefs = torch.ones(n_all_dist_layers, dtype=torch.float64).to(self.device) / n_all_dist_layers
+            dist_coefs = torch.ones(n_all_dist_layers, dtype=torch.float64).to(self.device)
+            dist_coefs /= n_all_dist_layers
         return dist_coefs
 
     def _mask_pruned_weights_grad(self):
