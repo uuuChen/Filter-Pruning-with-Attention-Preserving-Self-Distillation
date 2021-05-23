@@ -65,12 +65,7 @@ if args.t_load_model_path is 'None':
 
 class PGADModelTrainer(Trainer):
     """  A trainer for gradually self-distillation combined with attention mechanism and hard or soft pruning. """
-    def __init__(self,
-                 t_model,
-                 adapt_hidden_size,
-                 writer,
-                 *args,
-                 **kwargs):
+    def __init__(self, t_model, adapt_hidden_size, writer, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.t_model = t_model
         self.s_model = self.model
@@ -94,7 +89,7 @@ class PGADModelTrainer(Trainer):
         self.s_model_pruner = FiltersPruner(
             self.s_model,
             self.optimizer,
-            self.train_data_iter,
+            self.train_loader,
             self.device,
             self.logger,
             use_PFEC=self.args.use_PFEC
@@ -263,11 +258,7 @@ def main():
     load_model(t_model, args.t_load_model_path, logger, device)
     load_model(s_model, args.s_load_model_path, logger, device)
     optimizer = optim.SGD(
-        s_model.parameters(),
-        lr=args.lr,
-        momentum=args.momentum,
-        weight_decay=args.weight_decay,
-        nesterov=True
+        s_model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay, nesterov=True
     )
     base_trainer_cfg = (args, s_model, train_loader, eval_loader, optimizer, args.save_dir, device, logger)
     writer = SummaryWriter(log_dir=args.log_dir)  # For tensorboardX

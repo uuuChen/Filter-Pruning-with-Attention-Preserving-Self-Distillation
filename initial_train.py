@@ -78,11 +78,7 @@ def main():
     train_loader, eval_loader, num_classes = data_loader.__dict__[args.dataset](args.batch_size)
     model = models.__dict__[args.model](num_classes=num_classes)
     optimizer = optim.SGD(
-        model.parameters(),
-        lr=args.lr,
-        momentum=args.momentum,
-        weight_decay=args.weight_decay,
-        nesterov=True
+        model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay, nesterov=True
     )
     base_trainer_cfg = (args, model, train_loader, eval_loader, optimizer, args.save_dir, get_device(), logger)
     writer = SummaryWriter(log_dir=args.log_dir)  # For tensorboardX

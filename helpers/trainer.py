@@ -13,11 +13,11 @@ import torch
 
 class Trainer(object):
     """Training Helper Class"""
-    def __init__(self, args, model, train_data_iter, eval_data_iter, optimizer, save_dir, device, logger):
+    def __init__(self, args, model, train_loader, eval_loader, optimizer, save_dir, device, logger):
         self.args = args
         self.model = model
-        self.train_data_iter = train_data_iter  # Iterator to load data
-        self.eval_data_iter = eval_data_iter  # Iterator to load data
+        self.train_loader = train_loader  # Train data loader
+        self.eval_loader = eval_loader  # Eval data loader
         self.optimizer = optimizer
         self.save_dir = save_dir
         self.device = device  # Device name
@@ -33,7 +33,7 @@ class Trainer(object):
     def _train_epoch(self):
         self.model.train()  # Train mode
         e_loss, e_top1, e_top5 = get_average_meters(n=3)
-        iter_bar = tqdm(self.train_data_iter)
+        iter_bar = tqdm(self.train_loader)
         self.adjust_learning_rate()
         text = str()
         for i, batch in enumerate(iter_bar):
@@ -54,7 +54,7 @@ class Trainer(object):
 
     def _eval_epoch(self):
         self.model.eval()  # Evaluation mode
-        iter_bar = tqdm(self.eval_data_iter, desc='Iter')
+        iter_bar = tqdm(self.eval_loader, desc='Iter')
         e_result_vals = None
         for i, batch in enumerate(iter_bar, start=1):
             batch = [t.to(self.device) for t in batch]
