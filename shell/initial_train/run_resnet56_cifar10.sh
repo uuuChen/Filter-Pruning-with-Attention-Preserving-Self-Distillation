@@ -6,3 +6,4 @@ python3 initial_train.py \
     --lr_drops 10 0.2 0.2 0.2 \
     --lr 0.01 \
     --batch_size 128 \
+    --seed 8152 \
