@@ -8,19 +8,19 @@ from helpers.utils import min_max_scalar
 
 
 class FiltersPruner(object):
-    def __init__(self, model, optimizer, train_data_iter, device, use_PFEC=False):
+    def __init__(self, model, optimizer, train_data_iter, device, logger, use_PFEC=False):
         super(FiltersPruner, self).__init__()
         self.model = model
         self.optimizer = optimizer
         self.train_data_iter = train_data_iter
         self.device = device
+        self.logger = logger
         self.use_PFEC = use_PFEC
 
         self.cross_entropy = nn.CrossEntropyLoss()
         self.conv_mask = dict()
 
-    @staticmethod
-    def _get_prune_indices(conv_module, prune_rate, mode='filter-norm'):
+    def _get_prune_indices(self, conv_name, conv_module, prune_rate, mode='filter-a'):
         def get_gm_dists(weights):
             return np.array([np.sum(np.power(weights - weight, 2)) for weight in weights])
 
@@ -63,7 +63,7 @@ class FiltersPruner(object):
         rank_f_indices = np.argsort(f_scores)
         prune_f_nums = int(round(f_nums * (1.0 - prune_rate)))
         prune_f_indices = np.sort(rank_f_indices[:prune_f_nums])
-        print(rank_f_indices[:prune_f_nums])
+        self.logger.log(f'{conv_name:10} Prune-F-Indices : {prune_f_indices}')
         return prune_f_indices
 
     @staticmethod
@@ -153,7 +153,7 @@ class FiltersPruner(object):
                     self._prune_by_indices(module, prune_indices, dim=dim)
                     self._set_conv_mask(name, prune_indices, dim=dim)
                     dim = 0
-                prune_indices = self._get_prune_indices(module, prune_rates[i], mode=mode)
+                prune_indices = self._get_prune_indices(name, module, prune_rates[i], mode=mode)
                 self._prune_by_indices(module, prune_indices, dim=dim)
                 self._set_conv_mask(name, prune_indices, dim=dim)
                 dim = 1

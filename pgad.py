@@ -2,6 +2,7 @@ import argparse
 import os
 import sys
 import math
+import time
 
 from helpers.utils import (
     check_dirs_exist,
@@ -11,7 +12,7 @@ from helpers.utils import (
     save_model,
     print_nonzeros,
     set_seeds,
-    log_to_file
+    Logger
 )
 from helpers import data_loader
 import models
@@ -41,6 +42,7 @@ parser.add_argument('--leaky_relu_scope', type=float, default=0.2)
 parser.add_argument('--prune-mode', type=str, default='None')
 parser.add_argument('--prune-rates', nargs='+', type=float, default=[1.0])  # No prune by default
 parser.add_argument('--use-PFEC', action='store_true', default=False)
+parser.add_argument('--evaluate', action='store_true', default=False)
 parser.add_argument('--prune-interval', type=int, default=sys.maxsize)  # We will only prune once by default
 parser.add_argument('--dist-mode', type=str, default='None')  # pattern: "((all|conv|fc)(-attn)?(-grad)?-dist|None)"
 parser.add_argument('--dist-method', type=str, default='attn-feature')
@@ -54,9 +56,9 @@ args = parser.parse_args()
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'  # For Mac OS
 args.save_dir = f'saves/{args.model}_{args.dataset}/{args.prune_mode}'
 args.save_dir += '-once' if args.prune_interval == sys.maxsize else f'-{args.prune_interval}'
-args.save_dir += f'/{args.dist_mode}/{args.lr}'
+args.save_dir += f'/{args.dist_mode}/{int(time.time())}'
 args.log_dir = os.path.join(args.save_dir, 'log')
-args.log_file_path = os.path.join(args.save_dir, "args.txt")
+args.log_path = os.path.join(args.save_dir, "logs.txt")
 if args.t_load_model_path is 'None':
     args.t_load_model_path = args.s_load_model_path
 
@@ -77,7 +79,6 @@ class PGADModelTrainer(Trainer):
 
         self.do_prune = self.args.prune_mode is not 'None'
         self.do_dist = self.args.dist_mode is not 'None'
-        self.do_hard_prune = 'hard' in self.args.prune_mode
         self.do_soft_prune = 'soft' in self.args.prune_mode
         self.do_attn_dist = 'attn' in self.args.dist_mode
         self.do_grad_dist = 'grad' in self.args.dist_mode
@@ -95,6 +96,7 @@ class PGADModelTrainer(Trainer):
             self.optimizer,
             self.train_data_iter,
             self.device,
+            self.logger,
             use_PFEC=self.args.use_PFEC
         )
         self.last_epoch = None
@@ -139,9 +141,10 @@ class PGADModelTrainer(Trainer):
         conv_mask = self.s_model_pruner.conv_mask
         for name, module in self.s_model.named_modules():
             if name in conv_mask:
-                ori_grad_arr = module.weight.grad.data.cpu().numpy()
+                grad = module.weight.grad
+                ori_grad_arr = grad.data.cpu().numpy()
                 new_grad_arr = ori_grad_arr * conv_mask[name]
-                module.weight.grad.data = torch.from_numpy(new_grad_arr).to(self.device)
+                grad.data = torch.from_numpy(new_grad_arr).to(self.device)
 
     def _trans_features_for_dist(self, features_dict):
         def get_conv_attn_feature(feature):
@@ -220,7 +223,7 @@ class PGADModelTrainer(Trainer):
         total_loss.backward()
 
         # Set the gradient of the pruned weights to 0 if it's in the "hard prune mode"
-        if self.do_hard_prune:
+        if self.do_prune and not self.do_soft_prune:
             self._mask_pruned_weights_grad()
 
         # Get performance metrics
@@ -248,7 +251,7 @@ class PGADModelTrainer(Trainer):
 def main():
     set_seeds(args.seed)
     check_dirs_exist([args.save_dir])
-    log_to_file(str(args), args.log_file_path)
+    logger = Logger(args.log_path)
     device = get_device()
     if args.dataset not in data_loader.__dict__:
         raise NameError
@@ -266,19 +269,22 @@ def main():
         weight_decay=args.weight_decay,
         nesterov=True
     )
-    base_trainer_cfg = (args, s_model, train_loader, eval_loader, optimizer, args.save_dir, device)
-    writer = SummaryWriter(log_dir=args.log_dir)  # for tensorboardX
+    base_trainer_cfg = (args, s_model, train_loader, eval_loader, optimizer, args.save_dir, device, logger)
+    writer = SummaryWriter(log_dir=args.log_dir)  # For tensorboardX
     trainer = PGADModelTrainer(
         t_model,
         args.adapt_hidden_size,
         writer,
         *base_trainer_cfg
     )
-    # trainer.eval()  # Show loaded model performance as baseline
-    trainer.train()
-    if 'soft' in args.prune_mode:
-        s_model.prune(args.prune_mode, args.prune_rates)
-    trainer.eval()
+    logger.log('\n'.join(map(str, vars(args).items())))
+    if args.evaluate:
+        trainer.eval()
+    else:
+        trainer.train()
+        if 'soft' in args.prune_mode:
+            s_model.prune(args.prune_mode, args.prune_rates)
+        trainer.eval()
 
 
 if __name__ == '__main__':

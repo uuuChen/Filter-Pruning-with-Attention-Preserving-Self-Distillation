@@ -10,27 +10,29 @@ import torch
 
 class Trainer(object):
     """Training Helper Class"""
-    def __init__(self, args, model, train_data_iter, eval_data_iter, optimizer, save_dir, device):
+    def __init__(self, args, model, train_data_iter, eval_data_iter, optimizer, save_dir, device, logger):
         self.args = args
         self.model = model
-        self.train_data_iter = train_data_iter  # iterator to load data
-        self.eval_data_iter = eval_data_iter  # iterator to load data
+        self.train_data_iter = train_data_iter  # Iterator to load data
+        self.eval_data_iter = eval_data_iter  # Iterator to load data
         self.optimizer = optimizer
         self.save_dir = save_dir
-        self.device = device  # device name
+        self.device = device  # Device name
+        self.logger = logger
 
         self.cur_epoch = None
         self.global_step = None
         self.cur_lr = args.lr
 
     def _get_save_model_path(self, i):
-        return os.path.join(self.save_dir, f'model_epochs_{i}.pt')
+        return os.path.join(self.save_dir, f'model_best.pt')
 
     def _train_epoch(self):
-        self.model.train()  # train mode
+        self.model.train()  # Train mode
         e_loss, e_top1, e_top5 = get_average_meters(n=3)
         iter_bar = tqdm(self.train_data_iter)
         self.adjust_learning_rate()
+        text = str()
         for i, batch in enumerate(iter_bar):
             batch = [t.to(self.device) for t in batch]
 
@@ -42,17 +44,17 @@ class Trainer(object):
             e_loss.update(b_loss.item(), len(batch))
             e_top1.update(b_top1.item(), len(batch))
             e_top5.update(b_top5.item(), len(batch))
-            iter_bar.set_description(
-                f'Iter (loss={e_loss.mean:5.3f} | top1={e_top1.mean:5.3} | top5={e_top5.mean:5.3})'
-            )
+            text = f'Iter (loss={e_loss.mean:5.3f} | top1={e_top1.mean:5.3} | top5={e_top5.mean:5.3})'
+            iter_bar.set_description(text)
+        self.logger.log(f'[ Epoch {self.cur_epoch} (Train) ] : {text}', verbose=True)
 
     def _eval_epoch(self):
-        self.model.eval()  # evaluation mode
+        self.model.eval()  # Evaluation mode
         iter_bar = tqdm(self.eval_data_iter, desc='Iter')
         e_result_vals = None
         for i, batch in enumerate(iter_bar, start=1):
             batch = [t.to(self.device) for t in batch]
-            with torch.no_grad():  # evaluation without gradient calculation
+            with torch.no_grad():  # Evaluation without gradient calculation
                 b_result_dict = self.evaluate(batch)  # accuracy to print
                 b_result_vals = np.array(list(b_result_dict.values()))
             if e_result_vals is None:
@@ -60,7 +62,7 @@ class Trainer(object):
             e_result_vals += b_result_vals
             iter_bar.set_description('Iter')
         e_result_dict = dict(zip(b_result_dict.keys(), e_result_vals/len(iter_bar)))
-        print(f'Epoch {self.cur_epoch} :',  e_result_dict)
+        self.logger.log(f'[ Epoch {self.cur_epoch} (Test) ] : {e_result_dict}', verbose=True)
         return e_result_dict
 
     @abstractmethod
@@ -73,7 +75,7 @@ class Trainer(object):
 
     def train(self):
         """ Train Loop """
-        self.model.train()  # train mode
+        self.model.train()  # Train mode
         self.model = self.model.to(self.device)
         best_top1 = 0.
         self.global_step = 0
@@ -84,11 +86,10 @@ class Trainer(object):
             if best_top1 < eval_result['top1']:
                 best_top1 = eval_result['top1']
                 save_model(self.model, self._get_save_model_path(epoch))
-        save_model(self.model, self._get_save_model_path(self.args.n_epochs))
 
     def eval(self):
         """ Evaluation Loop """
-        self.model.eval() # evaluation mode
+        self.model.eval()  # Evaluation mode
         self.model = self.model.to(self.device)
         self._eval_epoch()
 
