@@ -7,6 +7,6 @@ python3 pgad.py \
     --lr 0.01 \
     --prune-rates 0.6 \
     --s-load-model-path saves/resnet56_cifar10/initial_train/model_epochs_1.pt \
-    --prune-mode filter-n-gm-1 \
+    --prune-mode filter-n-g-gm-1 \
     --dist-mode all-grad-dist \
     --use-PFEC

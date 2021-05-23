@@ -3,7 +3,10 @@ import numpy as np
 from tqdm import tqdm
 from abc import abstractmethod
 
-from helpers.utils import get_average_meters, save_model
+from helpers.utils import (
+    get_average_meters,
+    save_model
+)
 
 import torch
 
@@ -46,7 +49,8 @@ class Trainer(object):
             e_top5.update(b_top5.item(), len(batch))
             text = f'Iter (loss={e_loss.mean:5.3f} | top1={e_top1.mean:5.3} | top5={e_top5.mean:5.3})'
             iter_bar.set_description(text)
-        self.logger.log(f'[ Epoch {self.cur_epoch} (Train) ] : {text}', verbose=True)
+        text = f'[ Epoch {self.cur_epoch} (Train) ] : {text}'
+        self.logger.log(text, verbose=True)
 
     def _eval_epoch(self):
         self.model.eval()  # Evaluation mode
@@ -62,7 +66,8 @@ class Trainer(object):
             e_result_vals += b_result_vals
             iter_bar.set_description('Iter')
         e_result_dict = dict(zip(b_result_dict.keys(), e_result_vals/len(iter_bar)))
-        self.logger.log(f'[ Epoch {self.cur_epoch} (Test) ] : {e_result_dict}', verbose=True)
+        text = f'[ Epoch {self.cur_epoch} (Test) ] : {e_result_dict}'
+        self.logger.log(text, verbose=True)
         return e_result_dict
 
     @abstractmethod
@@ -85,7 +90,7 @@ class Trainer(object):
             eval_result = self._eval_epoch()
             if best_top1 < eval_result['top1']:
                 best_top1 = eval_result['top1']
-                save_model(self.model, self._get_save_model_path(epoch))
+                save_model(self.model, self._get_save_model_path(epoch), self.logger)
 
     def eval(self):
         """ Evaluation Loop """

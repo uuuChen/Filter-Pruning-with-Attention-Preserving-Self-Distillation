@@ -58,14 +58,14 @@ def accuracy(output, target, topk=(1,)):
     return res
 
 
-def load_model(model, file_path, device='cuda'):
-    print('Loading the model from', file_path)
+def load_model(model, file_path, logger, device='cuda'):
+    logger.log(f'Loading the model from {file_path}', verbose=True)
     if file_path is not None:
         model.load_state_dict(torch.load(file_path, map_location=device))
 
 
-def save_model(model, file_path):
-    print('Saving the model to', file_path)
+def save_model(model, file_path, logger):
+    logger.log(f'Saving the model to {file_path}', verbose=True)
     torch.save(model.state_dict(), file_path)
 
 

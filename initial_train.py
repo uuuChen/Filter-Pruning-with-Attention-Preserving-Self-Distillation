@@ -1,7 +1,14 @@
 import argparse
 import os
+import time
 
-from helpers.utils import check_dirs_exist, get_device, accuracy, set_seeds
+from helpers.utils import (
+    check_dirs_exist,
+    get_device,
+    accuracy,
+    set_seeds,
+    Logger
+)
 from helpers import data_loader
 import models
 from helpers.trainer import Trainer
@@ -25,8 +32,9 @@ parser.add_argument('--weight_decay', default=5e-4, type=float)
 args = parser.parse_args()
 
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'  # For Mac OS
-args.save_dir = f'saves/{args.model}_{args.dataset}/initial_train'
+args.save_dir = f'saves/{args.model}_{args.dataset}/initial_train/{int(time.time())}'
 args.log_dir = f'{args.save_dir}/log'
+args.log_path = os.path.join(args.save_dir, "logs.txt")
 
 
 class InitialModelTrainer(Trainer):
@@ -62,6 +70,7 @@ class InitialModelTrainer(Trainer):
 def main():
     set_seeds(args.seed)
     check_dirs_exist([args.save_dir])
+    logger = Logger(args.log_path)
     if args.dataset not in data_loader.__dict__:
         raise NameError
     if args.model not in models.__dict__:
@@ -75,9 +84,10 @@ def main():
         weight_decay=args.weight_decay,
         nesterov=True
     )
-    base_trainer_cfg = (args, model, train_loader, eval_loader, optimizer, args.save_dir, get_device())
+    base_trainer_cfg = (args, model, train_loader, eval_loader, optimizer, args.save_dir, get_device(), logger)
     writer = SummaryWriter(log_dir=args.log_dir)  # For tensorboardX
     trainer = InitialModelTrainer(writer, *base_trainer_cfg)
+    logger.log('\n'.join(map(str, vars(args).items())))
     trainer.train()
 
 
