@@ -8,7 +8,7 @@ python3 pgad.py \
     --lr-drops 0.2 0.2 0.2 \
     --prune-rates 0.6 \
     --prune-mode filter-n-g-gm-1 \
-    --samp-batches 4 \
+    --samp-batches 5 \
     --dist-mode all-grad-dist \
     --s-load-model-path saves/resnet56_cifar10/initial_train/model_epochs_1.pt \
     --use-PFEC \
