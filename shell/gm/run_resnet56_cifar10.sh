@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 python3 pgad.py \
-    --dataset cifar10 \
     --model resnet56 \
-    --schedule 60 120 160 \
-    --lr_drops 0.2 0.2 0.2 \
+    --dataset cifar10 \
     --lr 0.01 \
+    --schedule 60 120 160 \
+    --lr-drops 0.2 0.2 0.2 \
     --prune-rates 0.6 \
-    --s-load-model-path saves/resnet56_cifar10/initial_train/model_epochs_1.pt \
     --prune-mode filter-gm \
     --prune-interval 1 \
+    --s-load-model-path saves/resnet56_cifar10/initial_train/model_epochs_1.pt \
     --use-PFEC \
     --seed 8152 \
+
 

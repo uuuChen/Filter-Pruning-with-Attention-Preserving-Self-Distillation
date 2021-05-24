@@ -19,16 +19,16 @@ import torch.nn as nn
 
 
 parser = argparse.ArgumentParser(description="Initial Train Process")
-parser.add_argument('--n_epochs', default=200, type=int)
+parser.add_argument('--n-epochs', default=200, type=int)
 parser.add_argument('--batch_size', type=int, default=256)
 parser.add_argument('--lr', type=float, default=0.1)
 parser.add_argument('--seed', type=int, default=111)
 parser.add_argument('--model', type=str, default='alexnet')
 parser.add_argument('--dataset', type=str, default='cifar100')
 parser.add_argument('--schedule', type=int, nargs='+', default=[50, 100, 150])
-parser.add_argument('--lr_drops', type=float, nargs='+', default=[0.1, 0.1, 0.1])
+parser.add_argument('--lr-drops', type=float, nargs='+', default=[0.1, 0.1, 0.1])
 parser.add_argument('--momentum', default=0.9, type=float)
-parser.add_argument('--weight_decay', default=5e-4, type=float)
+parser.add_argument('--weight-decay', default=5e-4, type=float)
 args = parser.parse_args()
 
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'  # For Mac OS
@@ -85,6 +85,7 @@ def main():
     trainer = InitialModelTrainer(writer, *base_trainer_cfg)
     logger.log('\n'.join(map(str, vars(args).items())))
     trainer.train()
+    print(f'Log Path : {args.log_path}')
 
 
 if __name__ == '__main__':

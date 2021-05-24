@@ -27,7 +27,7 @@ class Trainer(object):
         self.global_step = None
         self.cur_lr = args.lr
 
-    def _get_save_model_path(self, i):
+    def _get_save_model_path(self):
         return os.path.join(self.save_dir, f'model_best.pt')
 
     def _train_epoch(self):
@@ -90,7 +90,7 @@ class Trainer(object):
             eval_result = self._eval_epoch()
             if best_top1 < eval_result['top1']:
                 best_top1 = eval_result['top1']
-                save_model(self.model, self._get_save_model_path(epoch), self.logger)
+                save_model(self.model, self._get_save_model_path(), self.logger)
 
     def eval(self):
         """ Evaluation Loop """

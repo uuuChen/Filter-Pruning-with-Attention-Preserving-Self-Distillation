@@ -8,12 +8,13 @@ from helpers.utils import min_max_scalar
 
 
 class FiltersPruner(object):
-    def __init__(self, model, optimizer, train_loader, device, logger, use_PFEC=False):
+    def __init__(self, model, optimizer, train_loader, logger, samp_batches=None, device='cuda', use_PFEC=False):
         super(FiltersPruner, self).__init__()
         self.model = model
         self.optimizer = optimizer
         self.train_loader = train_loader
         self.device = device
+        self.samp_batches = samp_batches
         self.logger = logger
         self.use_PFEC = use_PFEC
 
@@ -119,36 +120,16 @@ class FiltersPruner(object):
         elif dim == 1:
             mask_arr[:, prune_indices] = 0
 
-    # def _set_epoch_acc_weights_grad(self):
-    #     params = list(self.model.parameters())
-    #     acc_grads = None
-    #     iter_bar = tqdm(self.train_loader)
-    #     for i, batch in enumerate(iter_bar):
-    #         input_var, target_var = [t.to(self.device) for t in batch]
-    #         self.optimizer.zero_grad()
-    #         output_var = self.model(input_var)
-    #         loss = self.cross_entropy(output_var, target_var)
-    #         loss.backward()
-    #         if acc_grads is None:
-    #             acc_grads = np.array(
-    #                 [torch.zeros(p.grad.shape, dtype=torch.float64).to(self.device) for p in params],
-    #                 dtype=object
-    #             )
-    #         acc_grads += np.array([p.grad for p in params], dtype=object)
-    #     acc_grads /= len(iter_bar)
-    #     for p, acc_grad in zip(params, acc_grads):
-    #         p.grad.data = acc_grad
-
-    def _set_epoch_acc_weights_grad(self):
+    def _set_batches_weights_grad(self):
         params = list(self.model.parameters())
         train_iter = iter(self.train_loader)
         input_var, target_var = [t.to(self.device) for t in next(train_iter)]
-        for i, batch in enumerate(train_iter):
+        for i, batch in enumerate(train_iter, start=1):
+            if i == self.samp_batches:
+                break
             _input_var, _target_var = [t.to(self.device) for t in batch]
             input_var = torch.cat((input_var, _input_var), dim=0)
             target_var = torch.cat((target_var, _target_var), dim=0)
-            if i == 3:
-                break
         self.optimizer.zero_grad()
         output_var = self.model(input_var)
         loss = self.cross_entropy(output_var, target_var)
@@ -163,7 +144,7 @@ class FiltersPruner(object):
         prune_indices = None
         use_grad = '-g-' in mode
         if use_grad:
-            self._set_epoch_acc_weights_grad()
+            self._set_batches_weights_grad()
         for name, module in self.model.named_modules():
             if isinstance(module, torch.nn.Conv2d):
                 self._init_conv_mask(name, module)

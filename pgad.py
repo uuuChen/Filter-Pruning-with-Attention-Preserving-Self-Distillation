@@ -28,19 +28,21 @@ import torch.nn as nn
 
 
 parser = argparse.ArgumentParser(description='Prune Process')
-parser.add_argument('--n_epochs', type=int, default=200)
-parser.add_argument('--batch_size', type=int, default=256)
+parser.add_argument('--n-epochs', type=int, default=200)
+parser.add_argument('--batch-size', type=int, default=256)
 parser.add_argument('--lr', type=float, default=0.01)
 parser.add_argument('--seed', type=int, default=111)
 parser.add_argument('--model', type=str, default='alexnet')
 parser.add_argument('--dataset', type=str, default='cifar100')
 parser.add_argument('--schedule', type=int, nargs='+', default=[50, 100, 150])
-parser.add_argument('--lr_drops', type=float, nargs='+', default=[0.1, 0.1, 0.1])
+parser.add_argument('--lr-drops', type=float, nargs='+', default=[0.1, 0.1, 0.1])
 parser.add_argument('--momentum', type=float, default=0.9)
-parser.add_argument('--weight_decay', type=float, default=5e-4)
-parser.add_argument('--leaky_relu_scope', type=float, default=0.2)
+parser.add_argument('--weight-decay', type=float, default=5e-4)
+parser.add_argument('--leaky-relu-scope', type=float, default=0.2)
 parser.add_argument('--prune-mode', type=str, default='None')
 parser.add_argument('--prune-rates', nargs='+', type=float, default=[1.0])  # No prune by default
+parser.add_argument('--samp-batches', type=int, default=None)  # Sample batches to compute gradient for pruning. Use
+# all batches by default
 parser.add_argument('--use-PFEC', action='store_true', default=False)
 parser.add_argument('--evaluate', action='store_true', default=False)
 parser.add_argument('--prune-interval', type=int, default=sys.maxsize)  # We will only prune once by default
@@ -90,8 +92,9 @@ class PGADModelTrainer(Trainer):
             self.s_model,
             self.optimizer,
             self.train_loader,
-            self.device,
             self.logger,
+            samp_batches=self.args.samp_batches,
+            device=self.device,
             use_PFEC=self.args.use_PFEC
         )
         self.last_epoch = None
@@ -271,6 +274,7 @@ def main():
         if 'soft' in args.prune_mode:
             s_model.prune(args.prune_mode, args.prune_rates)
         trainer.eval()
+    print(f'Log Path : {args.log_path}')
 
 
 if __name__ == '__main__':
