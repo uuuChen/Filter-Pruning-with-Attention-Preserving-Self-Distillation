@@ -9,7 +9,6 @@ python3 pgad.py \
     --prune-mode filter-gm \
     --prune-interval 1 \
     --s-load-model-path saves/resnet56_cifar10/initial_train/model_epochs_1.pt \
-    --use-PFEC \
     --seed 8152 \
 
 

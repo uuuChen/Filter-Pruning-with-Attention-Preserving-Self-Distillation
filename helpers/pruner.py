@@ -20,6 +20,7 @@ class FiltersPruner(object):
 
         self.cross_entropy = nn.CrossEntropyLoss()
         self.conv_mask = dict()
+        self.use_grad = False
 
     def _get_prune_indices(self, conv_name, conv_module, prune_rate, mode='filter-a'):
         def get_gm_dists(weights):
@@ -32,7 +33,7 @@ class FiltersPruner(object):
         f_nums = f_weights.shape[0]
         flat_f_weights = f_weights.reshape(f_nums, -1)
         flat_f_grads = None
-        if '-g-' in mode:
+        if self.use_grad:
             f_grads = conv_module.weight.grad.data.cpu().numpy()  # The gradient of filters
             flat_f_grads = f_grads.reshape(f_nums, -1)
 
@@ -68,19 +69,25 @@ class FiltersPruner(object):
         return prune_f_indices
 
     @staticmethod
-    def _prune_by_indices(module, indices, dim=0):
-        weight = module.weight.data
-        if dim == 0:
-            weight[indices] = 0.0
-        elif dim == 1:
-            weight[:, indices] = 0.0
-
-    @staticmethod
     def _prune_by_threshold(module, threshold):
         device = module.weight.device
         tensor = module.weight.data.cpu().numpy()
         mask = np.where(abs(tensor) < threshold, 0, 1)
         module.weight.data = torch.from_numpy(tensor * mask).to(device)
+
+    def _prune_by_indices(self, module, indices, dim=0):
+        weight = module.weight.data
+        grad = None
+        if self.use_grad:
+            grad = module.weight.grad.data
+        if dim == 0:
+            weight[indices] = 0.0
+            if self.use_grad:
+                grad[indices] = 0.0
+        elif dim == 1:
+            weight[:, indices] = 0.0
+            if self.use_grad:
+                grad[:, indices] = 0.0
 
     def _check_prune_rates(self, prune_rates):
         i = 0
@@ -114,6 +121,9 @@ class FiltersPruner(object):
         elif dim == 1:
             mask_arr[:, prune_indices] = 0
 
+    def _set_use_grad(self, val=False):
+        self.use_grad = val
+
     def _set_batches_weights_grad(self):
         params = list(self.model.parameters())
         train_iter = iter(self.train_loader)
@@ -132,12 +142,11 @@ class FiltersPruner(object):
         for p, acc_grad in zip(params, acc_grads):
             p.grad.data = acc_grad
 
-    def _prune_filters_and_channels(self, prune_rates, mode='hard-filter-norm'):
+    def _prune_filters_and_channels(self, prune_rates, mode='filter-norm'):
         i = 0
         dim = 0
         prune_indices = None
-        use_grad = '-g-' in mode
-        if use_grad:
+        if self.use_grad:
             self._set_batches_weights_grad()
         for name, module in self.model.named_modules():
             if isinstance(module, torch.nn.Conv2d):
@@ -155,7 +164,7 @@ class FiltersPruner(object):
             elif isinstance(module, torch.nn.BatchNorm2d):
                 if 'filter' in mode and dim == 1:
                     self._prune_by_indices(module, prune_indices, dim=0)
-        if use_grad:
+        if self.use_grad:
             self.optimizer.zero_grad()
 
     def _get_conv_act_prune_rates(self, ideal_prune_rates, verbose=False):
@@ -205,6 +214,7 @@ class FiltersPruner(object):
             prune_rates = ideal_prune_rates
             if self.use_PFEC:
                 prune_rates = self._get_conv_act_prune_rates(ideal_prune_rates)
+            self._set_use_grad(val='-g-' in mode)
             self._prune_filters_and_channels(prune_rates, mode=mode)
 
 
