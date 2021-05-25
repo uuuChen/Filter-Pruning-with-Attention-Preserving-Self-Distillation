@@ -108,12 +108,13 @@ class PGADModelTrainer(Trainer):
             return min(math.ceil(((cur_epoch + 1) / n_epochs) * n_all_dist * 2), n_all_dist)
 
         def get_n_grad_dist_v2(cur_epoch, schedule, n_all_dist):
+            sc = [0] + schedule
             i = None
-            for i in range(len(schedule)):
-                if cur_epoch < schedule[i]:
+            for i in range(len(sc)):
+                if cur_epoch < sc[i]:
                     break
-            range_epochs = schedule[i] if i == 0 else schedule[i] - schedule[i - 1]
-            return min(math.ceil(((cur_epoch + 1) / range_epochs) * n_all_dist * 2), n_all_dist)
+            range_epochs = schedule[i] - schedule[i-1]
+            return min(math.ceil(((cur_epoch + 1 - schedule[i-1]) / range_epochs) * n_all_dist * 2), n_all_dist)
 
         def get_attn_scores(pair_features):
             scores = list()
@@ -139,6 +140,7 @@ class PGADModelTrainer(Trainer):
             # n_grad_dist = get_n_grad_dist_v2(self.cur_epoch, self.args.schedule, n_all_dist)
             dist_coefs = torch.zeros(n_all_dist, dtype=torch.float64).to(self.device)
             dist_coefs[:n_grad_dist] = 1 / n_grad_dist
+            # dist_coefs[:n_grad_dist] = 1 / n_all_dist
         else:
             dist_coefs = torch.ones(n_all_dist, dtype=torch.float64).to(self.device)
             dist_coefs /= n_all_dist

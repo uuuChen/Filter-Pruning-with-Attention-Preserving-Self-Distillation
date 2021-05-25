@@ -70,14 +70,8 @@ class FiltersPruner(object):
     @staticmethod
     def _prune_by_indices(module, indices, dim=0):
         weight = module.weight.data
-        bias = None
-        is_bias_exist = True if module.bias is not None else False
-        if is_bias_exist:
-            bias = module.bias.data
         if dim == 0:
             weight[indices] = 0.0
-            if is_bias_exist:
-                bias[indices] = 0.0
         elif dim == 1:
             weight[:, indices] = 0.0
 
@@ -148,14 +142,15 @@ class FiltersPruner(object):
         for name, module in self.model.named_modules():
             if isinstance(module, torch.nn.Conv2d):
                 self._init_conv_mask(name, module)
-                if dim == 1:
+                if self.use_PFEC and dim == 1:
                     self._prune_by_indices(module, prune_indices, dim=dim)
                     self._set_conv_mask(name, prune_indices, dim=dim)
                     dim = 0
                 prune_indices = self._get_prune_indices(name, module, prune_rates[i], mode=mode)
                 self._prune_by_indices(module, prune_indices, dim=dim)
                 self._set_conv_mask(name, prune_indices, dim=dim)
-                dim = 1
+                if self.use_PFEC:
+                    dim = 1
                 i += 1
             elif isinstance(module, torch.nn.BatchNorm2d):
                 if 'filter' in mode and dim == 1:
