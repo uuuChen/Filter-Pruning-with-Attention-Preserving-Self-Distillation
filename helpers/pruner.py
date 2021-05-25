@@ -151,18 +151,18 @@ class FiltersPruner(object):
         for name, module in self.model.named_modules():
             if isinstance(module, torch.nn.Conv2d):
                 self._init_conv_mask(name, module)
-                if dim == 1:
-                    self._prune_by_indices(module, prune_indices, dim=dim)
-                    self._set_conv_mask(name, prune_indices, dim=dim)
-                    dim = 0
+                # if dim == 1:
+                #     self._prune_by_indices(module, prune_indices, dim=dim)
+                #     self._set_conv_mask(name, prune_indices, dim=dim)
+                #     dim = 0
                 prune_indices = self._get_prune_indices(name, module, prune_rates[i], mode=mode)
                 self._prune_by_indices(module, prune_indices, dim=dim)
                 self._set_conv_mask(name, prune_indices, dim=dim)
-                dim = 1
+                # dim = 1
                 i += 1
-            elif isinstance(module, torch.nn.BatchNorm2d):
-                if 'filter' in mode and dim == 1:
-                    self._prune_by_indices(module, prune_indices, dim=0)
+            # elif isinstance(module, torch.nn.BatchNorm2d):
+            #     if 'filter' in mode and dim == 1:
+            #         self._prune_by_indices(module, prune_indices, dim=0)
         if self.use_grad:
             self.optimizer.zero_grad()
 
