@@ -75,19 +75,24 @@ class FiltersPruner(object):
         mask = np.where(abs(tensor) < threshold, 0, 1)
         module.weight.data = torch.from_numpy(tensor * mask).to(device)
 
-    def _prune_by_indices(self, module, indices, dim=0):
-        weight = module.weight.data
-        grad = None
-        if self.use_grad:
-            grad = module.weight.grad.data
+    @staticmethod
+    def _prune_by_indices(module, indices, dim=0, prune_weight=True, prune_bias=True, prune_grad=True):
+        l = list()
+        weight = module.weight
+        bias = module.bias
+        grad = module.weight.grad
+        if prune_weight:
+            l.append(weight)
+        if prune_bias and bias is not None:
+            l.append(bias)
+        if prune_grad and grad is not None:
+            l.append(grad)
         if dim == 0:
-            weight[indices] = 0.0
-            if self.use_grad:
-                grad[indices] = 0.0
+            for t in l:
+                t.data[indices] = 0.0
         elif dim == 1:
-            weight[:, indices] = 0.0
-            if self.use_grad:
-                grad[:, indices] = 0.0
+            for t in l:
+                t.data[:, indices] = 0.0
 
     def _check_prune_rates(self, prune_rates):
         i = 0
@@ -151,18 +156,18 @@ class FiltersPruner(object):
         for name, module in self.model.named_modules():
             if isinstance(module, torch.nn.Conv2d):
                 self._init_conv_mask(name, module)
-                # if dim == 1:
-                #     self._prune_by_indices(module, prune_indices, dim=dim)
-                #     self._set_conv_mask(name, prune_indices, dim=dim)
-                #     dim = 0
+                if dim == 1:
+                    # self._prune_by_indices(module, prune_indices, dim=dim)
+                    # self._set_conv_mask(name, prune_indices, dim=dim)
+                    dim = 0
                 prune_indices = self._get_prune_indices(name, module, prune_rates[i], mode=mode)
                 self._prune_by_indices(module, prune_indices, dim=dim)
                 self._set_conv_mask(name, prune_indices, dim=dim)
-                # dim = 1
+                dim = 1
                 i += 1
-            # elif isinstance(module, torch.nn.BatchNorm2d):
-            #     if 'filter' in mode and dim == 1:
-            #         self._prune_by_indices(module, prune_indices, dim=0)
+            elif isinstance(module, torch.nn.BatchNorm2d):
+                if 'filter' in mode and dim == 1:
+                    self._prune_by_indices(module, prune_indices, dim=0)
         if self.use_grad:
             self.optimizer.zero_grad()
 
