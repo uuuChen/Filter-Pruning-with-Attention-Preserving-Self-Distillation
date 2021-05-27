@@ -23,43 +23,50 @@ class FiltersPruner(object):
         self.use_grad = False
 
     def _get_prune_indices(self, conv_name, conv_module, prune_rate, mode='filter-a'):
-        def get_gm_dists(weights):
-            return np.array([np.sum(np.power(weights - weight, 2)) for weight in weights])
+        def get_gm_dists(arr):
+            return np.array([np.sum(np.power(ele - arr, 2)) for ele in arr])
 
-        def get_l1_scores(weights_2d):
-            return np.sum(np.abs(weights_2d), axis=1)
+        def get_l1_scores(arr2d):
+            return np.sum(np.abs(arr2d), axis=1)
 
-        f_weights = conv_module.weight.data.cpu().numpy()  # The weight of filters
-        f_nums = f_weights.shape[0]
-        flat_f_weights = f_weights.reshape(f_nums, -1)
-        flat_f_grads = None
+        f_w = conv_module.weight.data.cpu().numpy()  # The weight of filters
+        f_nums = f_w.shape[0]
+        flat_f_w = f_w.reshape(f_nums, -1)
+        flat_f_g = None
         if self.use_grad:
-            f_grads = conv_module.weight.grad.data.cpu().numpy()  # The gradient of filters
-            flat_f_grads = f_grads.reshape(f_nums, -1)
+            f_g = conv_module.weight.grad.data.cpu().numpy()  # The gradient of filters
+            flat_f_g = f_g.reshape(f_nums, -1)
 
+        # ------------------------------------
+        # In mode:
+        #    -g- : Combine gradients
+        #    -n- : Combine min-max-scalar
+        #    -a  : Use activation-base
+        #    -gm : Use geometric-median-base
+        # ------------------------------------
         if 'filter-a' in mode:
-            f_scores = get_l1_scores(flat_f_weights)
-        elif 'filter-gm' in mode:  # Geometric-median
-            f_scores = get_gm_dists(flat_f_weights)
-        elif 'filter-g-gm-1' in mode:  # Combine gradient-base and geometric-median
-            f_scores = get_gm_dists(flat_f_weights) * get_l1_scores(flat_f_grads)
-        elif 'filter-g-gm-2' in mode:  # Combine gradient-base and geometric-median
-            f_scores = get_gm_dists(flat_f_weights) + get_l1_scores(flat_f_grads)
-        elif 'filter-g-gm-3' in mode:  # Combine norm-gradient-base and norm-geometric-median
-            f_scores = get_gm_dists(flat_f_weights) * get_l1_scores(flat_f_grads) * get_l1_scores(flat_f_weights)
-        elif 'filter-n-g-gm-1' in mode:  # Combine norm-gradient-base and norm-geometric-median
-            f_scores = min_max_scalar(get_gm_dists(flat_f_weights)) + min_max_scalar(get_l1_scores(flat_f_grads))
+            f_scores = get_l1_scores(flat_f_w)
+        elif 'filter-g-a' in mode:
+            f_scores = np.sum(np.abs(flat_f_w) * np.abs(flat_f_g), axis=1)
+        elif 'filter-n-g-a' in mode:
+            f_scores = np.sum(min_max_scalar(np.abs(flat_f_w)) + min_max_scalar(np.abs(flat_f_g)), axis=1)
+        elif 'filter-n-g-a-2' in mode:
+            f_scores = min_max_scalar(get_l1_scores(flat_f_w)) + min_max_scalar(get_l1_scores(flat_f_g))
+        elif 'filter-gm' in mode:
+            f_scores = get_gm_dists(flat_f_w)
+        elif 'filter-g-gm-1' in mode:
+            f_scores = get_gm_dists(flat_f_w) * get_l1_scores(flat_f_g)
+        elif 'filter-g-gm-2' in mode:
+            f_scores = get_gm_dists(flat_f_w) + get_l1_scores(flat_f_g)
+        elif 'filter-g-gm-3' in mode:
+            f_scores = get_gm_dists(flat_f_w) * get_l1_scores(flat_f_g) * get_l1_scores(flat_f_w)
+        elif 'filter-n-g-gm-1' in mode:
+            f_scores = min_max_scalar(get_gm_dists(flat_f_w)) + min_max_scalar(get_l1_scores(flat_f_g))
         elif 'filter-n-g-gm-2' in mode:
-            f_scores = (min_max_scalar(get_gm_dists(flat_f_weights)) + min_max_scalar(get_l1_scores(flat_f_grads)) +
-                        min_max_scalar(get_l1_scores(flat_f_weights)))
-        elif 'filter-n-g-gm-3' in mode:  # Combine norm-gradient-base and norm-geometric-median
-            f_scores = min_max_scalar(get_gm_dists(flat_f_weights)) * min_max_scalar(get_l1_scores(flat_f_grads))
-        elif 'filter-g-a' in mode:  # Combine gradient-base and activation-base
-            f_scores = np.sum(np.abs(flat_f_weights) * np.abs(flat_f_grads), 1)
-        elif 'filter-n-g-a' in mode:  # Combine norm-gradient-base and norm-activation-base
-            f_scores = np.sum(min_max_scalar(np.abs(flat_f_weights)) + min_max_scalar(np.abs(flat_f_grads)), 1)
-        elif 'filter-n-g-a-2' in mode:  # Combine norm-gradient-base and norm-activation-base
-            f_scores = min_max_scalar(get_l1_scores(flat_f_weights)) + min_max_scalar(get_l1_scores(flat_f_grads))
+            f_scores = (min_max_scalar(get_gm_dists(flat_f_w)) + min_max_scalar(get_l1_scores(flat_f_g)) +
+                        min_max_scalar(get_l1_scores(flat_f_w)))
+        elif 'filter-n-g-gm-3' in mode:
+            f_scores = min_max_scalar(get_gm_dists(flat_f_w)) * min_max_scalar(get_l1_scores(flat_f_g))
         else:
             raise NameError
         rank_f_indices = np.argsort(f_scores)
