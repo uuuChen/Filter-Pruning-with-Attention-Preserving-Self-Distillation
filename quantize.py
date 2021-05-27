@@ -69,7 +69,7 @@ class QuantizedModelTrainer(Trainer):
                 quan_range = len(np.unique(quan_labels))
                 for i in range(quan_range):
                     group_indices = np.where(quan_labels == i)
-                    group_grad_mean = np.mean(grad[group_indices])
+                    group_grad_mean = np.sum(grad[group_indices])
                     grad[group_indices] = group_grad_mean
                 module.weight.grad.data = torch.from_numpy(grad).to(self.device)
 
