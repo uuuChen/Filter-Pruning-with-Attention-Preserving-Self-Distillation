@@ -8,6 +8,7 @@ from helpers.utils import (
     get_device,
     accuracy,
     set_seeds,
+    load_model,
     Logger
 )
 from helpers import data_loader
@@ -108,6 +109,7 @@ def main():
         raise NameError
     train_loader, eval_loader, num_classes = data_loader.__dict__[args.dataset](args.batch_size)
     model = models.__dict__[args.model](num_classes=num_classes)
+    load_model(model, args.load_model_path, logger, device)
     optimizer = optim.SGD(
         model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay, nesterov=True
     )
