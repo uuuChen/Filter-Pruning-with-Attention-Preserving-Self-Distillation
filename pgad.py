@@ -43,7 +43,9 @@ parser.add_argument('--prune-mode', type=str, default='None')
 parser.add_argument('--prune-rates', nargs='+', type=float, default=[1.0])  # No prune by default
 parser.add_argument('--samp-batches', type=int, default=None)  # Sample batches to compute gradient for pruning. Use
 # all batches by default
-parser.add_argument('--use-PFEC', action='store_true', default=False)
+parser.add_argument('--use-actPR', action='store_true', default=False)  # Compute actual pruning rates for conv layers
+# or not
+parser.add_argument('--use-greedy', action='store_true', default=False)  # Prune filters by greedy or independent
 parser.add_argument('--evaluate', action='store_true', default=False)
 parser.add_argument('--prune-interval', type=int, default=sys.maxsize)  # We will only prune once by default
 parser.add_argument('--dist-mode', type=str, default='None')  # pattern: "((all|conv|fc)(-attn)?(-grad)?-dist|None)"
@@ -95,7 +97,8 @@ class PGADModelTrainer(Trainer):
             self.logger,
             samp_batches=self.args.samp_batches,
             device=self.device,
-            use_PFEC=self.args.use_PFEC
+            use_actPR=self.args.use_actPR,
+            use_greedy=self.args.use_greedy
         )
         self.last_epoch = None
         self.init_adapt_layers = False

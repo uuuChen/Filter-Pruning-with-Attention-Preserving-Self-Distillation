@@ -8,7 +8,15 @@ from helpers.utils import min_max_scalar
 
 
 class FiltersPruner(object):
-    def __init__(self, model, optimizer, train_loader, logger, samp_batches=None, device='cuda', use_PFEC=False):
+    def __init__(self,
+                 model,
+                 optimizer,
+                 train_loader,
+                 logger,
+                 samp_batches=None,
+                 device='cuda',
+                 use_actPR=False,
+                 use_greedy=False):
         super(FiltersPruner, self).__init__()
         self.model = model
         self.optimizer = optimizer
@@ -16,7 +24,8 @@ class FiltersPruner(object):
         self.device = device
         self.samp_batches = samp_batches
         self.logger = logger
-        self.use_PFEC = use_PFEC
+        self.use_actPR = use_actPR
+        self.use_greedy = use_greedy
 
         self.cross_entropy = nn.CrossEntropyLoss()
         self.conv_mask = dict()
@@ -157,17 +166,22 @@ class FiltersPruner(object):
     def _prune_filters_and_channels(self, prune_rates, mode='filter-norm'):
         i = 0
         dim = 0
-        prune_indices = None
+        prune_indices = prune_indices_ = None
         if self.use_grad:
             self._set_batches_weights_grad()
         for name, module in self.model.named_modules():
             if isinstance(module, torch.nn.Conv2d):
                 self._init_conv_mask(name, module)
+                if not self.use_greedy:
+                    prune_indices_ = self._get_prune_indices(name, module, prune_rates[i], mode=mode)
                 if dim == 1:
-                    # self._prune_by_indices(module, prune_indices, dim=dim)
-                    # self._set_conv_mask(name, prune_indices, dim=dim)
+                    self._prune_by_indices(module, prune_indices, dim=dim)
+                    self._set_conv_mask(name, prune_indices, dim=dim)
                     dim = 0
-                prune_indices = self._get_prune_indices(name, module, prune_rates[i], mode=mode)
+                if self.use_greedy:
+                    prune_indices = self._get_prune_indices(name, module, prune_rates[i], mode=mode)
+                else:
+                    prune_indices = prune_indices_
                 self._prune_by_indices(module, prune_indices, dim=dim)
                 self._set_conv_mask(name, prune_indices, dim=dim)
                 dim = 1
@@ -223,7 +237,7 @@ class FiltersPruner(object):
             self._prune_by_percentile(ideal_prune_rates)
         elif 'filter' in mode:
             prune_rates = ideal_prune_rates
-            if self.use_PFEC:
+            if self.use_actPR:
                 prune_rates = self._get_conv_act_prune_rates(ideal_prune_rates)
             self._set_use_grad(val='-g-' in mode)
             self._prune_filters_and_channels(prune_rates, mode=mode)
