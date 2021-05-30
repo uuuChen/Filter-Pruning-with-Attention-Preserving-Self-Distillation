@@ -1,5 +1,4 @@
 import numpy as np
-from tqdm import tqdm
 
 import torch
 import torch.nn as nn
@@ -42,7 +41,7 @@ class FiltersPruner(object):
         f_nums = f_w.shape[0]
         flat_f_w = f_w.reshape(f_nums, -1)
         flat_f_g = None
-        if self.use_grad:
+        if self._get_use_grad():
             f_g = conv_module.weight.grad.data.cpu().numpy()  # The gradient of filters
             flat_f_g = f_g.reshape(f_nums, -1)
 
@@ -110,6 +109,21 @@ class FiltersPruner(object):
             for t in l:
                 t.data[:, indices] = 0.0
 
+    @staticmethod
+    def get_left_dict(model):
+        d = dict()
+        for name, param in model.state_dict().items():
+            if len(param.shape) == 4:  # Only consider conv layers
+                w = param.data.cpu().numpy()
+                t_w = np.transpose(w, (1, 0, 2, 3))
+                sum_f = np.sum(w.reshape(w.shape[0], -1), axis=1)
+                sum_c = np.sum(t_w.reshape(t_w.shape[0], -1), axis=1)
+                left_f = np.where(sum_f != 0)[0]
+                left_c = np.where(sum_c != 0)[0]
+                left_w = w[left_f[:, None], left_c]
+                d[name] = (np.float32(left_w), np.int32(left_f), np.int32(left_c))
+        return d
+
     def _check_prune_rates(self, prune_rates):
         i = 0
         for name, module in self.model.named_modules():
@@ -142,10 +156,13 @@ class FiltersPruner(object):
         elif dim == 1:
             mask_arr[:, prune_indices] = 0
 
+    def _get_use_grad(self):
+        return self.use_grad
+
     def _set_use_grad(self, val=False):
         self.use_grad = val
 
-    def _set_batches_weights_grad(self):
+    def _set_batches_weight_grad(self):
         params = list(self.model.parameters())
         train_iter = iter(self.train_loader)
         input_var, target_var = [t.to(self.device) for t in next(train_iter)]
@@ -167,8 +184,8 @@ class FiltersPruner(object):
         i = 0
         dim = 0
         prune_indices = prune_indices_ = None
-        if self.use_grad:
-            self._set_batches_weights_grad()
+        if self._get_use_grad():
+            self._set_batches_weight_grad()
         for name, module in self.model.named_modules():
             if isinstance(module, torch.nn.Conv2d):
                 self._init_conv_mask(name, module)
@@ -189,10 +206,10 @@ class FiltersPruner(object):
             elif isinstance(module, torch.nn.BatchNorm2d):
                 if 'filter' in mode and dim == 1:
                     self._prune_by_indices(module, prune_indices, dim=0)
-        if self.use_grad:
+        if self._get_use_grad():
             self.optimizer.zero_grad()
 
-    def _get_conv_act_prune_rates(self, ideal_prune_rates, verbose=False):
+    def _get_actual_prune_rates(self, ideal_prune_rates, verbose=False):
         """
         # Suppose the model prunes some filters (filters, :, :, :).
         # ---------------------------------------------
@@ -238,7 +255,7 @@ class FiltersPruner(object):
         elif 'filter' in mode:
             prune_rates = ideal_prune_rates
             if self.use_actPR:
-                prune_rates = self._get_conv_act_prune_rates(ideal_prune_rates)
+                prune_rates = self._get_actual_prune_rates(ideal_prune_rates)
             self._set_use_grad(val='-g-' in mode)
             self._prune_filters_and_channels(prune_rates, mode=mode)
 

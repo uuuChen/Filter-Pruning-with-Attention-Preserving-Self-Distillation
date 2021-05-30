@@ -4,6 +4,8 @@ from heapq import heappush, heappop, heapify
 import struct
 from pathlib import Path
 
+from helpers.pruner import FiltersPruner
+
 import torch
 import numpy as np
 from scipy.sparse import csr_matrix, csc_matrix
@@ -213,13 +215,17 @@ class HuffmanEncoder:
 
         return decode_node()
 
-    def _huffman_encode_conv(self, param, name, directory):
-        conv = param.data.cpu().numpy()
-        conv.dump(f'{directory}/{name}')
+    def _huffman_encode_conv(self, param, name, directory, left_dict):
+        left_w, left_f, left_c = left_dict[name]
+
+        # Encode
+        t0, d0 = self._huffman_encode(left_w, f'{name}_data', directory)
+        t1, d1 = self._huffman_encode(left_f, f'{name}_f_indices', directory)
+        t2, d2 = self._huffman_encode(left_c, f'{name}_c_indices', directory)
 
         # Print statistics
-        original = conv.nbytes
-        compressed = original
+        original = param.data.cpu().numpy().nbytes
+        compressed = t0 + t1 + t2 + d0 + d1 + d2
         log_text = (
             f"{name:<35} | {original:20} {compressed:20} {original / compressed:>10.2f}x "
             f"{100 * compressed / original:>6.2f}%"
@@ -229,8 +235,18 @@ class HuffmanEncoder:
         return original, compressed
 
     def _huffman_decode_conv(self, param, name, directory):
-        conv = np.load(f'{directory}/{name}', allow_pickle=True)
-        param.data = torch.from_numpy(conv).to(param.device)
+        # Decode data
+        left_w = self._huffman_decode(directory, f'{name}_data', dtype='float32')
+        left_f = self._huffman_decode(directory, f'{name}_f_indices', dtype='int32')
+        left_c = self._huffman_decode(directory, f'{name}_c_indices', dtype='int32')
+
+        # Reconstruct weight
+        weight = np.zeros(param.shape)
+        weight[left_f[:, None], left_c] = left_w.reshape(weight[left_f[:, None], left_c].shape)
+
+        # Return the parameters
+        param = torch.from_numpy(weight).to(param.device)
+        return param
 
     def _huffman_encode_fc(self, param, name, directory):
         weight = param.data.cpu().numpy()
@@ -270,8 +286,9 @@ class HuffmanEncoder:
         # Construct matrix
         mat = matrix((data, indices, indptr), shape)
 
-        # Insert to model
-        param.data = torch.from_numpy(mat.toarray()).to(param.device)
+        # Return the parameters
+        param = torch.from_numpy(mat.toarray()).to(param.device)
+        return param
 
     def _direct_dump(self, param, name, directory):
         data = param.data.cpu().numpy()
@@ -319,9 +336,10 @@ class HuffmanEncoder:
         # It's IMPORTANT to use state_dict() instead of named_parameters() here
         s = {'c': [0, 0], 'f': [0, 0], 'o': [0, 0], 't': [0, 0]}
         s2n = {'c': 'Conv', 'f': 'Fc', 'o': 'Other', 't': 'Total'}
+        left_conv_dict = FiltersPruner.get_left_dict(model)
         for name, param in model.state_dict().items():
             if len(param.shape) == 4:
-                orig, comp = self._huffman_encode_conv(param, name, directory)
+                orig, comp = self._huffman_encode_conv(param, name, directory, left_conv_dict)
                 key = 'c'
             elif len(param.shape) == 2:
                 orig, comp = self._huffman_encode_fc(param, name, directory)
@@ -348,10 +366,10 @@ class HuffmanEncoder:
         state_dict = dict()
         for name, param in model.state_dict().items():
             if len(param.shape) == 4:
-                self._huffman_decode_conv(param, name, directory)
+                dec_param = self._huffman_decode_conv(param, name, directory)
             elif len(param.shape) == 2:
-                self._huffman_decode_fc(param, name, directory)
+                dec_param = self._huffman_decode_fc(param, name, directory)
             else:
-                param = self._direct_load(param, name, directory)
-            state_dict[name] = param
+                dec_param = self._direct_load(param, name, directory)
+            state_dict[name] = dec_param
         model.load_state_dict(state_dict)

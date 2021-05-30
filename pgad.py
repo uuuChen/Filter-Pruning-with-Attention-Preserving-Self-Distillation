@@ -149,7 +149,7 @@ class PGADModelTrainer(Trainer):
             dist_coefs /= n_all_dist
         return dist_coefs
 
-    def _mask_pruned_weights_grad(self):
+    def _mask_pruned_weight_grad(self):
         conv_mask = self.s_model_pruner.conv_mask
         for name, module in self.s_model.named_modules():
             if name in conv_mask:
@@ -236,7 +236,7 @@ class PGADModelTrainer(Trainer):
 
         # Set the gradient of the pruned weights to 0 if it's in the "hard prune mode"
         if self.do_prune and not self.do_soft_prune:
-            self._mask_pruned_weights_grad()
+            self._mask_pruned_weight_grad()
 
         # Get performance metrics
         top1, top5 = accuracy(s_output_var, target_var, topk=(1, 5))

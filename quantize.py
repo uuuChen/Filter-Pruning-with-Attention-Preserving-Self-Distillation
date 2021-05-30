@@ -55,7 +55,7 @@ class QuantizedModelTrainer(Trainer):
         quantizer.quantize(self.model, self.args.quan_bits)
         self.quan_dict = quantizer.get_quan_dict()
 
-    def _set_quantized_weights_grad(self):
+    def _set_quantized_weight_grad(self):
         for name, module in self.model.named_modules():
             if name in self.quan_dict:
                 weight = module.weight.data.cpu().numpy()
@@ -78,7 +78,7 @@ class QuantizedModelTrainer(Trainer):
         output_var = self.model(input_var)
         loss = self.cross_entropy(output_var, target_var)
         loss.backward()
-        self._set_quantized_weights_grad()
+        self._set_quantized_weight_grad()
         top1, top5 = accuracy(output_var, target_var, topk=(1, 5))
         self.writer.add_scalars(
             'data/scalar_group', {
