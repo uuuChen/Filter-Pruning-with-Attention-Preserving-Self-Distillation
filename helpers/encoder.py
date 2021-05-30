@@ -250,19 +250,13 @@ class HuffmanEncoder:
 
     def _huffman_encode_fc(self, param, name, directory):
         weight = param.data.cpu().numpy()
-        shape = weight.shape
-
-        form = 'csr' if shape[0] < shape[1] else 'csc'
-        mat = csr_matrix(weight) if shape[0] < shape[1] else csc_matrix(weight)
 
         # Encode
-        t0, d0 = self._huffman_encode(mat.data, f'{name}_{form}_data', directory)
-        t1, d1 = self._huffman_encode(mat.indices, f'{name}_{form}_indices', directory)
-        t2, d2 = self._huffman_encode(self._calc_index_diff(mat.indptr), f'{name}_{form}_indptr', directory)
+        t0, d0 = self._huffman_encode(weight, f'{name}_data', directory)
 
         # Print statistics
         original = param.data.cpu().numpy().nbytes
-        compressed = t0 + t1 + t2 + d0 + d1 + d2
+        compressed = t0 + d0
         log_text = (
             f"{name:<35} | {original:20} {compressed:20} {original / compressed:>10.2f}x "
             f"{100 * compressed / original:>6.2f}%"
@@ -272,22 +266,14 @@ class HuffmanEncoder:
         return original, compressed
 
     def _huffman_decode_fc(self, param, name, directory):
-        weight = param.data.cpu().numpy()
-        shape = weight.shape
-
-        form = 'csr' if shape[0] < shape[1] else 'csc'
-        matrix = csr_matrix if shape[0] < shape[1] else csc_matrix
-
         # Decode data
-        data = self._huffman_decode(directory, f'{name}_{form}_data', dtype='float32')
-        indices = self._huffman_decode(directory, f'{name}_{form}_indices', dtype='int32')
-        indptr = self._reconstruct_indptr(self._huffman_decode(directory, f'{name}_{form}_indptr', dtype='int32'))
+        weight = self._huffman_decode(directory, f'{name}_data', dtype='float32')
 
-        # Construct matrix
-        mat = matrix((data, indices, indptr), shape)
+        # Reconstruct weight
+        weight = weight.reshape(param.shape)
 
         # Return the parameters
-        param = torch.from_numpy(mat.toarray()).to(param.device)
+        param = torch.from_numpy(weight).to(param.device)
         return param
 
     def _direct_dump(self, param, name, directory):
