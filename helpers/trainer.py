@@ -24,8 +24,8 @@ class Trainer(object):
         self.logger = logger
 
         self.cur_epoch = None
+        self.cur_lr = None
         self.global_step = None
-        self.cur_lr = args.lr
 
     def _get_save_model_path(self):
         return os.path.join(self.save_dir, f'model_best.pt')
@@ -34,13 +34,13 @@ class Trainer(object):
         self.model.train()  # Train mode
         e_loss, e_top1, e_top5 = get_average_meters(n=3)
         iter_bar = tqdm(self.train_loader)
-        self.adjust_learning_rate()
+        self._adjust_learning_rate()
         text = str()
         for i, batch in enumerate(iter_bar):
             batch = [t.to(self.device) for t in batch]
 
             self.optimizer.zero_grad()
-            b_loss, b_top1, b_top5 = self.get_loss_and_backward(batch)
+            b_loss, b_top1, b_top5 = self._get_loss_and_backward(batch)
             self.optimizer.step()
 
             self.global_step += 1
@@ -59,7 +59,7 @@ class Trainer(object):
         for i, batch in enumerate(iter_bar, start=1):
             batch = [t.to(self.device) for t in batch]
             with torch.no_grad():  # Evaluation without gradient calculation
-                b_result_dict = self.evaluate(batch)  # accuracy to print
+                b_result_dict = self._evaluate(batch)  # Accuracy to print
                 b_result_vals = np.array(list(b_result_dict.values()))
             if e_result_vals is None:
                 e_result_vals = [0] * len(b_result_vals)
@@ -70,12 +70,19 @@ class Trainer(object):
         self.logger.log(text, verbose=True)
         return e_result_dict
 
+    def _adjust_learning_rate(self):
+        if self.cur_epoch in self.args.schedule:
+            i = self.args.schedule.index(self.cur_epoch)
+            self.cur_lr *= self.args.lr_drops[i]
+            for param_group in self.optimizer.param_groups:
+                param_group['lr'] = self.cur_lr
+
     @abstractmethod
-    def get_loss_and_backward(self, batch):
+    def _get_loss_and_backward(self, batch):
         return NotImplementedError
 
     @abstractmethod
-    def evaluate(self, batch):
+    def _evaluate(self, batch):
         return NotImplementedError
 
     def train(self):
@@ -83,6 +90,7 @@ class Trainer(object):
         self.model.train()  # Train mode
         self.model = self.model.to(self.device)
         best_top1 = 0.
+        self.cur_lr = self.args.lr
         self.global_step = 0
         for epoch in range(self.args.n_epochs):
             self.cur_epoch = epoch
@@ -97,12 +105,5 @@ class Trainer(object):
         self.model.eval()  # Evaluation mode
         self.model = self.model.to(self.device)
         self._eval_epoch()
-
-    def adjust_learning_rate(self):
-        if self.cur_epoch in self.args.schedule:
-            i = self.args.schedule.index(self.cur_epoch)
-            self.cur_lr *= self.args.lr_drops[i]
-            for param_group in self.optimizer.param_groups:
-                param_group['lr'] = self.cur_lr
 
 

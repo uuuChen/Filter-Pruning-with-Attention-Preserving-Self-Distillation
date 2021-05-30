@@ -27,9 +27,9 @@ import torch.nn.functional as F
 import torch.nn as nn
 
 
-parser = argparse.ArgumentParser(description='Prune Process')
+parser = argparse.ArgumentParser(description='Attention Distilled With Pruned Model Process')
 parser.add_argument('--n-epochs', type=int, default=200)
-parser.add_argument('--batch-size', type=int, default=256)
+parser.add_argument('--batch-size', type=int, default=128)
 parser.add_argument('--lr', type=float, default=0.01)
 parser.add_argument('--seed', type=int, default=111)
 parser.add_argument('--model', type=str, default='alexnet')
@@ -209,7 +209,7 @@ class PGADModelTrainer(Trainer):
 
         return GAD_loss
 
-    def get_loss_and_backward(self, batch):
+    def _get_loss_and_backward(self, batch):
         input_var, target_var = batch
 
         # Prune the weights per "args.prune_interval" if it's in the "prune mode"
@@ -252,7 +252,7 @@ class PGADModelTrainer(Trainer):
         )
         return total_loss, top1, top5
 
-    def evaluate(self, batch):
+    def _evaluate(self, batch):
         input_var, target_var = batch
         output_var = self.s_model(input_var)
         loss = self.cross_entropy(output_var, target_var)

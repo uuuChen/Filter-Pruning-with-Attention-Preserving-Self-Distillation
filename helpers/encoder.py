@@ -214,22 +214,6 @@ class HuffmanEncoder:
         return decode_node()
 
     def _huffman_encode_conv(self, param, name, directory):
-        #################################
-        # TODO:
-        #   You can refer to the code of the function "_huffman_encode_fc" below, but note that "csr_matrix" can only
-        #   be used on 2-dimensional data
-        #   --------------------------------------------------------
-        #   HINT:
-        #   Suppose the shape of the weights of a certain convolution layer is (Kn, Ch, W, H)
-        #   ---
-        #   1. Call function "csr_matrix" for all (Kn * Ch) two-dimensional matrices (W, H), and get "data",
-        #   "length of data", "indices", and "indptr" of all (Kn * Ch) csr_matrix.
-        #   2. Concatenate these 4 parts of all (Kn * Ch) csr_matrices individually into 4 one-dimensional
-        #   lists, so there will be 4 lists.
-        #   3. Do huffman coding on these 4 lists individually.
-        #################################
-
-        # Note that we do not huffman encode "conv" yet. The following four lines of code need to be modified
         conv = param.data.cpu().numpy()
         conv.dump(f'{directory}/{name}')
 
@@ -237,13 +221,16 @@ class HuffmanEncoder:
         original = conv.nbytes
         compressed = original
         log_text = (
-            f"{name:<15} | "
-            f"{original:20} {compressed:20} {original / compressed:>10.2f}x "
-            f"{100 * compressed / original:>6.2f}% (NEED TO BE IMPLEMENTED)"
+            f"{name:<35} | {original:20} {compressed:20} {original / compressed:>10.2f}x "
+            f"{100 * compressed / original:>6.2f}%"
         )
         self.logger.log(log_text, verbose=True)
 
         return original, compressed
+
+    def _huffman_decode_conv(self, param, name, directory):
+        conv = np.load(f'{directory}/{name}', allow_pickle=True)
+        param.data = torch.from_numpy(conv).to(param.device)
 
     def _huffman_encode_fc(self, param, name, directory):
         weight = param.data.cpu().numpy()
@@ -253,49 +240,20 @@ class HuffmanEncoder:
         mat = csr_matrix(weight) if shape[0] < shape[1] else csc_matrix(weight)
 
         # Encode
-        t0, d0 = self._huffman_encode(mat.data, name + f'_{form}_data', directory)
-        t1, d1 = self._huffman_encode(mat.indices, name + f'_{form}_indices', directory)
-        t2, d2 = self._huffman_encode(self._calc_index_diff(mat.indptr), name + f'_{form}_indptr', directory)
+        t0, d0 = self._huffman_encode(mat.data, f'{name}_{form}_data', directory)
+        t1, d1 = self._huffman_encode(mat.indices, f'{name}_{form}_indices', directory)
+        t2, d2 = self._huffman_encode(self._calc_index_diff(mat.indptr), f'{name}_{form}_indptr', directory)
 
         # Print statistics
         original = param.data.cpu().numpy().nbytes
         compressed = t0 + t1 + t2 + d0 + d1 + d2
         log_text = (
-            f"{name:<15} | {original:20} {compressed:20} {original / compressed:>10.2f}x "
+            f"{name:<35} | {original:20} {compressed:20} {original / compressed:>10.2f}x "
             f"{100 * compressed / original:>6.2f}%"
         )
         self.logger.log(log_text, verbose=True)
 
         return original, compressed
-
-    def _dump_bias(self, param, name, directory):
-        # Note that we do not huffman encode bias
-        bias = param.data.cpu().numpy()
-        bias.dump(f'{directory}/{name}')
-
-        # Print statistics
-        original = bias.nbytes
-        compressed = bias.nbytes
-
-        log_text = (
-            f"{name:<15} | "
-            f"{original:20} {compressed:20} {original / compressed:>10.2f}x "
-            f"{100 * compressed / original:>6.2f}%"
-        )
-        self.logger.log(log_text, verbose=True)
-
-        return original, compressed
-
-    def _huffman_decode_conv(self, param, name, directory):
-        #################################
-        # TODO:
-        #   Decode according to the code of "conv" section you write in the function "huffman encode model"
-        #   above, and refer to encode and decode code of "fc"
-        #################################
-
-        # Note that we do not huffman decode "conv" yet. The following three lines of code need to be modified
-        conv = np.load(directory + '/' + name, allow_pickle=True)
-        param.data = torch.from_numpy(conv).to(param.device)
 
     def _huffman_decode_fc(self, param, name, directory):
         weight = param.data.cpu().numpy()
@@ -305,9 +263,9 @@ class HuffmanEncoder:
         matrix = csr_matrix if shape[0] < shape[1] else csc_matrix
 
         # Decode data
-        data = self._huffman_decode(directory, name + f'_{form}_data', dtype='float32')
-        indices = self._huffman_decode(directory, name + f'_{form}_indices', dtype='int32')
-        indptr = self._reconstruct_indptr(self._huffman_decode(directory, name + f'_{form}_indptr', dtype='int32'))
+        data = self._huffman_decode(directory, f'{name}_{form}_data', dtype='float32')
+        indices = self._huffman_decode(directory, f'{name}_{form}_indices', dtype='int32')
+        indptr = self._reconstruct_indptr(self._huffman_decode(directory, f'{name}_{form}_indptr', dtype='int32'))
 
         # Construct matrix
         mat = matrix((data, indices, indptr), shape)
@@ -315,44 +273,85 @@ class HuffmanEncoder:
         # Insert to model
         param.data = torch.from_numpy(mat.toarray()).to(param.device)
 
-    def _load_bias(self, param, name, directory):
-        bias = np.load(directory + '/' + name, allow_pickle=True)
-        param.data = torch.from_numpy(bias).to(param.device)
+    def _direct_dump(self, param, name, directory):
+        data = param.data.cpu().numpy()
+        data.dump(f'{directory}/{name}')
+
+        # Print statistics
+        original = data.nbytes
+        compressed = data.nbytes
+
+        log_text = (
+            f"{name:<35} | {original:20} {compressed:20} {original / compressed:>10.2f}x "
+            f"{100 * compressed / original:>6.2f}%"
+        )
+        self.logger.log(log_text, verbose=True)
+
+        return original, compressed
+
+    def _direct_load(self, param, name, directory):
+        data = np.load(f'{directory}/{name}', allow_pickle=True)
+        param = torch.from_numpy(data).to(param.device)
+        return param
 
     # Encode / Decode models
     def huffman_encode_model(self, model, directory='encodings/'):
-        os.makedirs(directory, exist_ok=True)
-        original_sum = 0
-        compressed_sum = 0
-        log_text = (f"{'Layer':<15} | {'original bytes':>20} {'compressed bytes':>20} {'improvement':>11} "
-                    f"{'percent':>7}\n"
-                    f"-" * 70)
+        def get_title_text():
+            return (f"{'Layer':<35} | {'original bytes':>20} {'compressed bytes':>20} {'improvement':>11} "
+                    f"{'percent':>7}")
+
+        def get_text_by_key(key):
+            nonlocal s, s2n
+            name = s2n[key]
+            orig = s[key][0]
+            comp = s[key][1]
+            return f"{name:35} | {orig:>20} {comp:>20} {orig / comp:>10.2f}x {100 * comp / orig:>6.2f}%"
+
+        # Log title
+        log_text = (
+            f"{get_title_text()}\n" +
+            (f"-" * 120)
+        )
         self.logger.log(log_text, verbose=True)
-        for name, param in model.named_parameters():
-            if 'weight' in name:  # Weights
-                if 'conv' in name:
-                    original, compressed = self._huffman_encode_conv(param, name, directory)
-                elif 'fc' in name:
-                    original, compressed = self._huffman_encode_fc(param, name, directory)
-                else:
-                    raise NameError
-            else:  # Bias
-                original, compressed = self._dump_bias(param, name, directory)
-            original_sum += original
-            compressed_sum += compressed
-        log_text = (f"-" * 70 + "\n" 
-                    f"{'total':15} | {original_sum:>20} {compressed_sum:>20} {original_sum / compressed_sum:>10.2f}x "
-                    f"{100 * compressed_sum / original_sum:>6.2f}%")
+        os.makedirs(directory, exist_ok=True)
+
+        # Start Encoding
+        # It's IMPORTANT to use state_dict() instead of named_parameters() here
+        s = {'c': [0, 0], 'f': [0, 0], 'o': [0, 0], 't': [0, 0]}
+        s2n = {'c': 'Conv', 'f': 'Fc', 'o': 'Other', 't': 'Total'}
+        for name, param in model.state_dict().items():
+            if len(param.shape) == 4:
+                orig, comp = self._huffman_encode_conv(param, name, directory)
+                key = 'c'
+            elif len(param.shape) == 2:
+                orig, comp = self._huffman_encode_fc(param, name, directory)
+                key = 'f'
+            else:
+                orig, comp = self._direct_dump(param, name, directory)
+                key = 'o'
+            s[key][0] += orig
+            s[key][1] += comp
+            s['t'][0] += orig
+            s['t'][1] += comp
+
+        # Log results of the compression rate
+        log_text = (
+            f"-" * 120 + "\n" +
+            f"{get_text_by_key('t')}\n"
+            f"{get_text_by_key('c')}\n"
+            f"{get_text_by_key('f')}\n"
+            f"{get_text_by_key('o')}\n"
+        )
         self.logger.log(log_text, verbose=True)
 
     def huffman_decode_model(self, model, directory='encodings/'):
-        for name, param in model.named_parameters():
-            if 'weight' in name:
-                if 'conv' in name:
-                    self._huffman_decode_conv(param, name, directory)
-                elif 'fc' in name:
-                    self._huffman_decode_fc(param, name, directory)
-                else:
-                    raise NameError
+        state_dict = dict()
+        for name, param in model.state_dict().items():
+            if len(param.shape) == 4:
+                self._huffman_decode_conv(param, name, directory)
+            elif len(param.shape) == 2:
+                self._huffman_decode_fc(param, name, directory)
             else:
-                self._load_bias(param, name, directory)
+                param = self._direct_load(param, name, directory)
+            state_dict[name] = param
+        model.load_state_dict(state_dict)

@@ -22,7 +22,7 @@ import torch.optim as optim
 import torch.nn as nn
 
 
-parser = argparse.ArgumentParser(description="Initial Train Process")
+parser = argparse.ArgumentParser(description="Quantize Process")
 parser.add_argument('--n-epochs', default=20, type=int)
 parser.add_argument('--batch-size', type=int, default=256)
 parser.add_argument('--lr', type=float, default=0.001)
@@ -73,7 +73,7 @@ class QuantizedModelTrainer(Trainer):
                     grad[group_indices] = group_grad_mean
                 module.weight.grad.data = torch.from_numpy(grad).to(self.device)
 
-    def get_loss_and_backward(self, batch):
+    def _get_loss_and_backward(self, batch):
         input_var, target_var = batch
         output_var = self.model(input_var)
         loss = self.cross_entropy(output_var, target_var)
@@ -90,7 +90,7 @@ class QuantizedModelTrainer(Trainer):
         )
         return loss, top1, top5
 
-    def evaluate(self, batch):
+    def _evaluate(self, batch):
         input_var, target_var = batch
         output_var = self.model(input_var)
         loss = self.cross_entropy(output_var, target_var)
