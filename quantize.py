@@ -11,7 +11,7 @@ from helpers.utils import (
     load_model,
     Logger
 )
-from helpers import data_loader
+from helpers import dataset
 import models
 from helpers.trainer import Trainer
 from helpers.quantizer import PostQuantizer
@@ -103,11 +103,11 @@ def main():
     check_dirs_exist([args.save_dir])
     logger = Logger(args.log_path)
     device = get_device()
-    if args.dataset not in data_loader.__dict__:
+    if args.dataset not in dataset.__dict__:
         raise NameError
     if args.model not in models.__dict__:
         raise NameError
-    train_loader, eval_loader, num_classes = data_loader.__dict__[args.dataset](args.batch_size)
+    train_loader, eval_loader, num_classes = dataset.__dict__[args.dataset](args.batch_size)
     model = models.__dict__[args.model](num_classes=num_classes)
     load_model(model, args.load_model_path, logger, device)
     optimizer = optim.SGD(

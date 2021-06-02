@@ -8,7 +8,6 @@ from helpers.pruner import FiltersPruner
 
 import torch
 import numpy as np
-from scipy.sparse import csr_matrix, csc_matrix
 
 Node = namedtuple('Node', 'freq value left right')
 Node.__lt__ = lambda x, y: x.freq < y.freq
@@ -319,7 +318,7 @@ class HuffmanEncoder:
         os.makedirs(directory, exist_ok=True)
 
         # Start Encoding
-        # It's IMPORTANT to use state_dict() instead of named_parameters() here
+        # NOTE: It's IMPORTANT to use state_dict() instead of named_parameters() here
         s = {'c': [0, 0], 'f': [0, 0], 'o': [0, 0], 't': [0, 0]}
         s2n = {'c': 'Conv', 'f': 'Fc', 'o': 'Other', 't': 'Total'}
         left_conv_dict = FiltersPruner.get_left_dict(model)

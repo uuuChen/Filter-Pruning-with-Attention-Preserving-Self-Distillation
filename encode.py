@@ -9,7 +9,7 @@ from helpers.utils import (
     get_device,
     Logger
 )
-from helpers import data_loader
+from helpers import dataset
 from helpers.trainer import Trainer
 from helpers.encoder import HuffmanEncoder
 import models
@@ -50,11 +50,11 @@ def main():
     check_dirs_exist([args.save_dir])
     logger = Logger(args.log_path)
     device = get_device()
-    if args.dataset not in data_loader.__dict__:
+    if args.dataset not in dataset.__dict__:
         raise NameError
     if args.model not in models.__dict__:
         raise NameError
-    _, eval_loader, num_classes = data_loader.__dict__[args.dataset](args.batch_size)
+    _, eval_loader, num_classes = dataset.__dict__[args.dataset](args.batch_size)
     enc_model = models.__dict__[args.model](num_classes=num_classes)
     load_model(enc_model, args.load_model_path, logger, device)
     base_cfg = (args, enc_model, _, eval_loader, _, args.save_dir, device, logger)

@@ -56,6 +56,7 @@ class Trainer(object):
         self.model.eval()  # Evaluation mode
         iter_bar = tqdm(self.eval_loader, desc='Iter')
         e_result_vals = None
+        b_result_dict = None
         for i, batch in enumerate(iter_bar, start=1):
             batch = [t.to(self.device) for t in batch]
             with torch.no_grad():  # Evaluation without gradient calculation

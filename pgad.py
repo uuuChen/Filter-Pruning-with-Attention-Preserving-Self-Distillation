@@ -14,7 +14,7 @@ from helpers.utils import (
     set_seeds,
     Logger
 )
-from helpers import data_loader
+from helpers import dataset
 import models
 from helpers.feature_extractor import FeatureExtractor
 from helpers.trainer import Trainer
@@ -50,8 +50,9 @@ parser.add_argument('--evaluate', action='store_true', default=False)
 parser.add_argument('--prune-interval', type=int, default=sys.maxsize)  # We will only prune once by default
 parser.add_argument('--dist-mode', type=str, default='None')  # pattern: "((all|conv|fc)(-attn)?(-grad)?-dist|None)"
 parser.add_argument('--dist-method', type=str, default='attn-feature')
-parser.add_argument('--dist-temperature', type=float, default=2.5)
+parser.add_argument('--dist-temperature', type=float, default=4.0)
 parser.add_argument('--gad-factor', type=float, default=50.0)
+parser.add_argument('--kd-factor', type=float, default=0.9)
 parser.add_argument('--t-load-model-path', type=str, default='None')
 parser.add_argument('--s-load-model-path', type=str, default='None')
 parser.add_argument('--adapt-hidden-size', type=int, default=128)
@@ -140,9 +141,10 @@ class PGADModelTrainer(Trainer):
             dist_coefs = get_attn_scores(pair_feats)
         elif self.do_grad_dist:
             n_grad_dist = get_n_grad_dist(self.cur_epoch, self.args.n_epochs, n_all_dist)
-            # n_grad_dist = get_n_grad_dist_v2(self.cur_epoch, self.args.schedule, n_all_dist)
             dist_coefs = torch.zeros(n_all_dist, dtype=torch.float64).to(self.device)
             dist_coefs[:n_grad_dist] = 1 / n_grad_dist
+            # n_grad_dist = get_n_grad_dist_v2(self.cur_epoch, self.args.schedule, n_all_dist)
+            # dist_coefs = torch.zeros(n_all_dist, dtype=torch.float64).to(self.device)
             # dist_coefs[:n_grad_dist] = 1 / n_all_dist
         else:
             dist_coefs = torch.ones(n_all_dist, dtype=torch.float64).to(self.device)
@@ -179,7 +181,7 @@ class PGADModelTrainer(Trainer):
                     dist_feature = feature
                 else:
                     continue
-            else:
+            else:  # Logit
                 dist_feature = feature
             dist_features.append(dist_feature)
         return dist_features
@@ -187,27 +189,27 @@ class PGADModelTrainer(Trainer):
     def _get_GAD_loss(self, s_dist_features, t_dist_features):
         # Get feature loss of all distilled layers
         feature_losses = list()
-        for s_feature, t_feature in zip(s_dist_features[:-1], t_dist_features[:-1]):
+        for s_feature, t_feature in zip(s_dist_features, t_dist_features):
             feature_losses.append(self.mse_loss(s_feature, t_feature.detach()))
         feature_losses = torch.stack(feature_losses)
 
-        # Get soft logit loss
-        T = self.args.dist_temperature
-        soft_logit_loss = self.kl_div(
-            F.log_softmax(s_dist_features[-1] / T, dim=1),
-            F.softmax(t_dist_features[-1].detach() / T, dim=1),
-        ) * T * T
-
         # Combine feature losses and soft logit loss with attention coefficients
-        dist_losses = torch.cat((feature_losses, soft_logit_loss.view(1)), dim=0)
         GA_coefs = self._get_GA_coefs(s_dist_features, t_dist_features)
-        GAD_loss = torch.mean(dist_losses * GA_coefs)
+        GAD_loss = torch.mean(feature_losses * GA_coefs)
 
         # Print (loss, coefficient) pairs
-        loss_coef_pairs = list(zip(dist_losses.cpu().detach().numpy(), GA_coefs.cpu().detach().numpy()))
-        print(loss_coef_pairs)
+        # loss_coef_pairs = list(zip(feature_losses.cpu().detach().numpy(), GA_coefs.cpu().detach().numpy()))
+        # print(loss_coef_pairs)
 
         return GAD_loss
+
+    def _get_KD_loss(self, s_logit, t_logit):
+        T = self.args.dist_temperature
+        loss = self.kl_div(
+            F.log_softmax(s_logit / T, dim=1),
+            F.softmax(t_logit.detach() / T, dim=1),
+        ) * T * T
+        return loss
 
     def _get_loss_and_backward(self, batch):
         input_var, target_var = batch
@@ -227,11 +229,12 @@ class PGADModelTrainer(Trainer):
             s_dist_features = self._trans_features_for_dist(s_features_dict)
             t_dist_features = self._trans_features_for_dist(t_features_dict)
             pred_loss = self.cross_entropy(s_output_var, target_var)
-            GAD_loss = self._get_GAD_loss(s_dist_features, t_dist_features)
+            GAD_loss = self._get_GAD_loss(s_dist_features[:-1], t_dist_features[:-1])
+            KD_loss = self._get_KD_loss(s_dist_features[-1], t_dist_features[-1])
         else:
             pred_loss = self.cross_entropy(s_output_var, target_var)
-            GAD_loss = torch.zeros(1, dtype=torch.float64).to(self.device)
-        total_loss = pred_loss + GAD_loss * self.args.gad_factor
+            GAD_loss = KD_loss = torch.zeros(1, dtype=torch.float64).to(self.device)
+        total_loss = pred_loss + GAD_loss * self.args.gad_factor + KD_loss * self.args.kd_factor
         total_loss.backward()
 
         # Set the gradient of the pruned weights to 0 if it's in the "hard prune mode"
@@ -265,11 +268,11 @@ def main():
     check_dirs_exist([args.save_dir])
     logger = Logger(args.log_path)
     device = get_device()
-    if args.dataset not in data_loader.__dict__:
+    if args.dataset not in dataset.__dict__:
         raise NameError
     if args.model not in models.__dict__:
         raise NameError
-    train_loader, eval_loader, num_classes = data_loader.__dict__[args.dataset](args.batch_size)
+    train_loader, eval_loader, num_classes = dataset.__dict__[args.dataset](args.batch_size)
     t_model = models.__dict__[args.model](num_classes=num_classes)
     s_model = models.__dict__[args.model](num_classes=num_classes)
     load_model(t_model, args.t_load_model_path, logger, device)

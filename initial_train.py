@@ -9,7 +9,7 @@ from helpers.utils import (
     set_seeds,
     Logger
 )
-from helpers import data_loader
+from helpers import dataset
 import models
 from helpers.trainer import Trainer
 
@@ -71,11 +71,11 @@ def main():
     set_seeds(args.seed)
     check_dirs_exist([args.save_dir])
     logger = Logger(args.log_path)
-    if args.dataset not in data_loader.__dict__:
+    if args.dataset not in dataset.__dict__:
         raise NameError
     if args.model not in models.__dict__:
         raise NameError
-    train_loader, eval_loader, num_classes = data_loader.__dict__[args.dataset](args.batch_size)
+    train_loader, eval_loader, num_classes = dataset.__dict__[args.dataset](args.batch_size)
     model = models.__dict__[args.model](num_classes=num_classes)
     optimizer = optim.SGD(
         model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay, nesterov=True
