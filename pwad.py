@@ -101,7 +101,7 @@ class PWADModelTrainer(Trainer):
             s_shapes=s_shapes,
             t_shapes=t_shapes,
             adapt_dim=adapt_dim
-        )
+        ).to(self.device)
         self.optimizer.add_param_group({'params': self.w_distiller.parameters()})
         self.last_epoch = None
 

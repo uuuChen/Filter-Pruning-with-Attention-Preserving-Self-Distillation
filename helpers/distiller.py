@@ -13,12 +13,12 @@ class Add(Function):
     @staticmethod
     def forward(ctx, s_w, attn_w):
         ctx.a_shape = attn_w.shape
-        s_w.data.add_(attn_w.view(s_w.shape))
+        s_w.data.add_(attn_w.view(s_w.shape) * 0.001)
         return s_w
 
     @staticmethod
     def backward(ctx, grad_output):
-        return grad_output, grad_output.view(ctx.a_shape)
+        return None, grad_output.view(ctx.a_shape)
 
 
 class FilterAttentionDistiller(nn.Module):
