@@ -92,6 +92,10 @@ class Logger:
             if verbose:
                 print(text)
 
+    def log_line(self):
+        line = '\n' + '-' * 100
+        self.log(line)
+
 
 class AverageMeter:
     def __init__(self):

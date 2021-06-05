@@ -16,7 +16,7 @@ from helpers.utils import (
 )
 from helpers import dataset
 import models
-from helpers.feature_extractor import FeatureExtractor
+from helpers.extractor import FeatureExtractor
 from helpers.trainer import Trainer
 from helpers.pruner import FiltersPruner
 
@@ -111,14 +111,14 @@ class PGADModelTrainer(Trainer):
         def get_n_grad_dist(cur_epoch, n_epochs, n_all_dist):
             return min(math.ceil(((cur_epoch + 1) / n_epochs) * n_all_dist * 2), n_all_dist)
 
-        def get_n_grad_dist_v2(cur_epoch, schedule, n_all_dist):
-            sc = [0] + schedule
+        def get_n_grad_dist_v2(cur_epoch, schedule, n_epochs, n_all_dist):
+            sc = [0] + schedule + [n_epochs]
             i = None
             for i in range(len(sc)):
                 if cur_epoch < sc[i]:
                     break
-            range_epochs = schedule[i] - schedule[i-1]
-            return min(math.ceil(((cur_epoch + 1 - schedule[i-1]) / range_epochs) * n_all_dist * 2), n_all_dist)
+            range_epochs = sc[i] - sc[i-1]
+            return min(math.ceil(((cur_epoch + 1 - sc[i-1]) / range_epochs) * n_all_dist * 2), n_all_dist)
 
         def get_attn_scores(pair_features):
             scores = list()
@@ -143,7 +143,7 @@ class PGADModelTrainer(Trainer):
             n_grad_dist = get_n_grad_dist(self.cur_epoch, self.args.n_epochs, n_all_dist)
             dist_coefs = torch.zeros(n_all_dist, dtype=torch.float64).to(self.device)
             dist_coefs[:n_grad_dist] = 1 / n_grad_dist
-            # n_grad_dist = get_n_grad_dist_v2(self.cur_epoch, self.args.schedule, n_all_dist)
+            # n_grad_dist = get_n_grad_dist_v2(self.cur_epoch, self.args.schedule, self.args.n_epochs, n_all_dist)
             # dist_coefs = torch.zeros(n_all_dist, dtype=torch.float64).to(self.device)
             # dist_coefs[:n_grad_dist] = 1 / n_all_dist
         else:

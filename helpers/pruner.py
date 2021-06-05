@@ -109,21 +109,6 @@ class FiltersPruner(object):
             for t in l:
                 t.data[:, indices] = 0.0
 
-    @staticmethod
-    def get_left_dict(model):
-        d = dict()
-        for name, param in model.state_dict().items():
-            if len(param.shape) == 4:  # Only consider conv layers
-                w = param.data.cpu().numpy()
-                t_w = np.transpose(w, (1, 0, 2, 3))
-                sum_f = np.sum(w.reshape(w.shape[0], -1), axis=1)
-                sum_c = np.sum(t_w.reshape(t_w.shape[0], -1), axis=1)
-                left_f = np.where(sum_f != 0)[0]
-                left_c = np.where(sum_c != 0)[0]
-                left_w = w[left_f[:, None], left_c]
-                d[name] = (np.float32(left_w), np.int32(left_f), np.int32(left_c))
-        return d
-
     def _check_prune_rates(self, prune_rates):
         i = 0
         for name, module in self.model.named_modules():
@@ -192,8 +177,8 @@ class FiltersPruner(object):
                 if not self.use_greedy:
                     prune_indices_ = self._get_prune_indices(name, module, prune_rates[i], mode=mode)
                 if dim == 1:
-                    self._prune_by_indices(module, prune_indices, dim=dim)
-                    self._set_conv_mask(name, prune_indices, dim=dim)
+                    # self._prune_by_indices(module, prune_indices, dim=dim)
+                    # self._set_conv_mask(name, prune_indices, dim=dim)
                     dim = 0
                 if self.use_greedy:
                     prune_indices = self._get_prune_indices(name, module, prune_rates[i], mode=mode)
@@ -247,6 +232,24 @@ class FiltersPruner(object):
                           f'% | actual filter prune rate : {act_f_prune_rate * 100.:.2f}% | filter bias: '
                           f'{f_bias * 100.:.2f}%')
         return prune_rates
+
+    @staticmethod
+    def get_left_dict(model):
+        d = dict()
+        for name, param in model.state_dict().items():
+            if len(param.shape) == 4:  # Only consider conv layers
+                w = param.data.cpu().numpy()
+                trans_w = np.transpose(w, (1, 0, 2, 3))
+                sum_f = np.sum(w.reshape(w.shape[0], -1), axis=1)
+                sum_c = np.sum(trans_w.reshape(trans_w.shape[0], -1), axis=1)
+                left_f_ind = np.where(sum_f != 0)[0]  # Indices of the left filters
+                left_c_ind = np.where(sum_c != 0)[0]  # Indices of the left channels
+                left_w = w[left_f_ind[:, None], left_c_ind]
+                d[name] = (np.float32(left_w), np.int32(left_f_ind), np.int32(left_c_ind))
+        return d
+
+    def get_conv_mask(self):
+        return self.conv_mask
 
     def prune(self, mode, ideal_prune_rates):
         ideal_prune_rates = self._check_prune_rates(ideal_prune_rates)

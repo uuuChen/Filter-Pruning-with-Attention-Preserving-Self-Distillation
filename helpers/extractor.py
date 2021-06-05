@@ -19,3 +19,15 @@ class FeatureExtractor(nn.Module):
     def forward(self, x):
         out = self.model(x)
         return out, self._features
+
+
+class ConvWeightExtractor(object):
+    def __init__(self):
+        super().__init__()
+
+    def __call__(self, model):
+        d = dict()
+        for name, child in model.named_modules():
+            if isinstance(child, nn.Conv2d):
+                d[name] = child.weight
+        return d
