@@ -3,29 +3,30 @@ import os
 import sys
 import math
 import time
-import numpy as np
 
 from helpers.utils import (
     check_dirs_exist,
     get_device,
     accuracy,
     load_model,
+    save_model,
     print_nonzeros,
     set_seeds,
     Logger
 )
 from helpers import dataset
-from helpers.extractor import (
-    ConvWeightExtractor
-)
+import models
 from helpers.trainer import Trainer
 from helpers.pruner import FiltersPruner
-from distillers_zoo.FAD import FilterAttentionDistiller
-import models
+from distillers_zoo import (
+    MultiSPDistiller,
+    KLDistiller
+)
 
 from tensorboardX import SummaryWriter
 import torch
 import torch.optim as optim
+import torch.nn.functional as F
 import torch.nn as nn
 
 
@@ -40,25 +41,22 @@ parser.add_argument('--schedule', type=int, nargs='+', default=[50, 100, 150])
 parser.add_argument('--lr-drops', type=float, nargs='+', default=[0.1, 0.1, 0.1])
 parser.add_argument('--momentum', type=float, default=0.9)
 parser.add_argument('--weight-decay', type=float, default=5e-4)
-parser.add_argument('--leaky-relu-scope', type=float, default=0.2)
-parser.add_argument('--prune-mode', type=str, default='None')  # No prune by default
+parser.add_argument('--prune-mode', type=str, default='None')
 parser.add_argument('--soft-prune', action='store_true', default=False)  # Do soft pruning or not
-parser.add_argument('--prune-rates', nargs='+', type=float, default=[1.0])
+parser.add_argument('--prune-rates', nargs='+', type=float, default=[1.0])  # No prune by default
 parser.add_argument('--samp-batches', type=int, default=None)  # Sample batches to compute gradient for pruning. Use
 # all batches by default
 parser.add_argument('--use-actPR', action='store_true', default=False)  # Compute actual pruning rates for conv layers
 # or not
 parser.add_argument('--use-greedy', action='store_true', default=False)  # Prune filters by greedy or independent
 parser.add_argument('--evaluate', action='store_true', default=False)
-parser.add_argument('--prune-interval', type=int, default=sys.maxsize)  # Do pruning process once by default
-parser.add_argument('--dist-mode', type=str, default='None')  # Pattern: "((all|conv|fc)(-attn)?(-grad)?-dist|None)"
-parser.add_argument('--dist-method', type=str, default='attn-feature')
-parser.add_argument('--dist-temperature', type=float, default=4.0)
-parser.add_argument('--gad-factor', type=float, default=50.0)
-parser.add_argument('--kd-factor', type=float, default=0.9)
+parser.add_argument('--prune-interval', type=int, default=sys.maxsize)  # We will only prune once by default
+parser.add_argument('--distill', type=str, default='msp')  # Which distillation methods to use
+parser.add_argument('--kd-T', type=float, default=4.0)  # Temperature for KL distillation
+parser.add_argument('--alpha', type=float, default=0.9)
+parser.add_argument('--beta', type=float, default=50.0)  # For custom-method distillation
 parser.add_argument('--t-load-model-path', type=str, default='None')
 parser.add_argument('--s-load-model-path', type=str, default='None')
-parser.add_argument('--adapt-dim', type=int, default=128)
 args = parser.parse_args()
 
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'  # For Mac OS
@@ -69,73 +67,37 @@ if args.t_load_model_path is 'None':
     args.t_load_model_path = args.s_load_model_path
 
 
-class PWADModelTrainer(Trainer):
-    """  A trainer for weight distillation combined with attention mechanism and hard or soft pruning. """
-    def __init__(self, t_model, adapt_dim, writer, *args, **kwargs):
+class PMSPModelTrainer(Trainer):
+    """  A trainer for gradually self-distillation combined with attention mechanism and hard or soft pruning. """
+    def __init__(self, t_model, writer, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.s_model = self.model
         self.t_model = t_model
+        self.s_model = self.model
         self.writer = writer
 
         self.do_prune = self.args.prune_mode is not 'None'
         self.do_soft_prune = self.args.soft_prune
-        self.cross_entropy = nn.CrossEntropyLoss()
+        self.criterion_cls = nn.CrossEntropyLoss()
+        self.criterion_div = KLDistiller(self.args.kd_T)
+        self.criterion_kd = MultiSPDistiller()
 
-        self.s_pruner = FiltersPruner(
+        self.s_model_pruner = FiltersPruner(
             self.s_model,
             self.optimizer,
             self.train_loader,
             self.logger,
+            samp_batches=self.args.samp_batches,
             device=self.device,
             use_actPR=self.args.use_actPR,
-            use_greedy=self.args.use_greedy,
-            samp_batches=self.args.samp_batches,
+            use_greedy=self.args.use_greedy
         )
-        self.conv_extractor = ConvWeightExtractor()
-        self.s_w, s_shapes = self._get_weight_for_dist(self.s_model)
-        self.t_w, t_shapes = self._get_weight_for_dist(self.t_model, n_dist_layers=len(s_shapes))
-        self.w_distiller = FilterAttentionDistiller(
-            s_shapes=s_shapes,
-            t_shapes=t_shapes,
-            adapt_dim=adapt_dim
-        ).to(self.device)
-        self.optimizer.add_param_group({'params': self.w_distiller.parameters()})
         self.last_epoch = None
 
         self.t_model.eval()
         self.t_model = self.t_model.to(self.device)
 
-    def _get_weight_for_dist(self, model, n_dist_layers=None):
-        conv_dict = self.conv_extractor(model)
-        n_layers = len(conv_dict)
-        if n_dist_layers is None:
-            n_dist_layers = n_layers
-
-        def get_indices():
-            nonlocal n_layers, n_dist_layers
-            start = 0
-            i = start
-            ind = list()
-            n_steps = math.ceil(n_layers / n_dist_layers)
-            for _ in range(n_dist_layers):
-                ind.append(i)
-                i += n_steps
-                if i >= n_layers:
-                    start += 1
-                    i = start
-            ind = sorted(ind)
-            return ind
-
-        indices = get_indices()
-        weights = list()
-        shapes = list()
-        for w in np.array(list(conv_dict.values()))[indices]:
-            weights.append(w)
-            shapes.append(w.shape)
-        return weights, shapes
-
     def _mask_pruned_weight_grad(self):
-        conv_mask = self.s_pruner.get_conv_mask()
+        conv_mask = self.s_model_pruner.conv_mask
         for name, module in self.s_model.named_modules():
             if name in conv_mask:
                 grad = module.weight.grad
@@ -144,44 +106,54 @@ class PWADModelTrainer(Trainer):
                 grad.data = torch.from_numpy(new_grad_arr).to(self.device)
 
     def _get_loss_and_backward(self, batch):
-        input_var, target_var = batch
+        input, target = batch
 
         # Prune the weights per "args.prune_interval" if it's in the "prune mode"
         if self.do_prune:
             if self.last_epoch != self.cur_epoch and self.cur_epoch % self.args.prune_interval == 0:
-                self.s_pruner.prune(self.args.prune_mode, self.args.prune_rates)
+                self.s_model_pruner.prune(self.args.prune_mode, self.args.prune_rates)
                 self.last_epoch = self.cur_epoch
                 print_nonzeros(self.s_model)
 
-        # 1. Distill the conv weight of the teacher to the student
-        # 2. Forward and get the prediction loss
-        # 3. Backward and pass the gradients to the distiller
-        s_upd_w = self.w_distiller(self.s_w, self.t_w)
-        s_output_var = self.s_model(input_var)
-        pred_loss = self.cross_entropy(s_output_var, target_var)
-        pred_loss.backward(retain_graph=True)
-        for upd_w, ori_w in zip(s_upd_w, self.s_w):
-            upd_w.backward(ori_w.grad, retain_graph=True)
+        # Do different kinds of distillation according to "args.distill"
+        s_feat, s_logit = self.s_model(input, is_block_feat=True)
+        t_feat, t_logit = self.t_model(input, is_block_feat=True)
+        if self.args.distill == 'msp':
+            s_f = s_feat
+            t_f = t_feat[-3:]
+        else:
+            raise NotImplementedError(self.args.distill)
+
+        loss_cls = self.criterion_cls(s_logit, target)
+        loss_div = self.criterion_div(s_logit, t_logit)
+        loss_kd = self.criterion_kd(s_f, t_f)
+
+        total_loss = loss_cls + loss_div * self.args.alpha + loss_kd * self.args.beta
+        total_loss.backward()
 
         # Set the gradient of the pruned weights to 0 if it's in the "hard prune mode"
         if self.do_prune and not self.do_soft_prune:
             self._mask_pruned_weight_grad()
 
         # Get performance metrics
-        top1, top5 = accuracy(s_output_var, target_var, topk=(1, 5))
+        top1, top5 = accuracy(s_logit, target, topk=(1, 5))
         self.writer.add_scalars(
             'data/scalar_group', {
+                'total_loss': total_loss.item(),
+                'pred_loss': loss_cls.item(),
+                'div_loss': loss_div.item(),
+                'kd_loss': loss_kd.item(),
                 'lr': self.cur_lr,
                 'top1': top1,
                 'top5': top5
             }, self.global_step
         )
-        return pred_loss, top1, top5
+        return total_loss, top1, top5
 
     def _evaluate(self, batch):
         input_var, target_var = batch
         output_var = self.s_model(input_var)
-        loss = self.cross_entropy(output_var, target_var)
+        loss = self.criterion_cls(output_var, target_var)
         top1, top5 = accuracy(output_var, target_var, topk=(1, 5))
         return {'loss': loss, 'top1': top1, 'top5': top5}
 
@@ -195,7 +167,6 @@ def main():
         raise NameError
     if args.model not in models.__dict__:
         raise NameError
-    logger.log_line()
     train_loader, eval_loader, num_classes = dataset.__dict__[args.dataset](args.batch_size)
     t_model = models.__dict__[args.model](num_classes=num_classes)
     s_model = models.__dict__[args.model](num_classes=num_classes)
@@ -206,7 +177,7 @@ def main():
     )
     base_trainer_cfg = (args, s_model, train_loader, eval_loader, optimizer, args.save_dir, device, logger)
     writer = SummaryWriter(log_dir=args.log_dir)  # For tensorboardX
-    trainer = PWADModelTrainer(t_model, args.adapt_dim, writer, *base_trainer_cfg)
+    trainer = PMSPModelTrainer(t_model, writer, *base_trainer_cfg)
     logger.log('\n'.join(map(str, vars(args).items())))
     if args.evaluate:
         trainer.eval()

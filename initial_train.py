@@ -32,9 +32,9 @@ parser.add_argument('--weight-decay', default=5e-4, type=float)
 args = parser.parse_args()
 
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'  # For Mac OS
-args.save_dir = f'saves/{args.model}_{args.dataset}/initial_train/{int(time.time())}'
+args.save_dir = f'saves/{int(time.time())}'
 args.log_dir = f'{args.save_dir}/log'
-args.log_path = os.path.join(args.save_dir, "logs.txt")
+args.log_path = f'saves/logs.txt'
 
 
 class InitialModelTrainer(Trainer):
@@ -75,6 +75,7 @@ def main():
         raise NameError
     if args.model not in models.__dict__:
         raise NameError
+    logger.log_line()
     train_loader, eval_loader, num_classes = dataset.__dict__[args.dataset](args.batch_size)
     model = models.__dict__[args.model](num_classes=num_classes)
     optimizer = optim.SGD(

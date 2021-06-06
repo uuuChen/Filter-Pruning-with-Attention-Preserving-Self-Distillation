@@ -6,19 +6,21 @@ import torch.nn.functional as F
 from torch.autograd import Function
 
 
-__all__ = ['FilterAttentionDistiller', 'KLDistiller']
+__all__ = ['FilterAttentionDistiller']
 
 
 class Add(Function):
     @staticmethod
     def forward(ctx, s_w, attn_w):
+        alpha = 0.001
         ctx.a_shape = attn_w.shape
-        s_w.data.add_(attn_w.view(s_w.shape) * 0.001)
+        ctx.alpha = alpha
+        s_w.data.add_(attn_w.view(s_w.shape) * alpha)
         return s_w
 
     @staticmethod
     def backward(ctx, grad_output):
-        return None, grad_output.view(ctx.a_shape)
+        return None, grad_output.view(ctx.a_shape) * ctx.alpha
 
 
 class FilterAttentionDistiller(nn.Module):
@@ -31,9 +33,7 @@ class FilterAttentionDistiller(nn.Module):
         # Shape of s_w    : (nl,), (s_nk, s_ch, s_w, s_h)
         # Shape of attn_w : (nl,), (s_nk, s_ch * s_w * s_h)
         # --------------------------------------------
-        upd_w = list()
-        for s, a in zip(s_w, attn_w):
-            upd_w.append(Add.apply(s, a))
+        upd_w = [Add.apply(s, a) for s, a in zip(s_w, attn_w)]
         return upd_w
 
     def forward(self, s_w, t_w):
@@ -130,20 +130,5 @@ class DecodingTransform(nn.Module):
         # --------------------------------------------
         w = [trans(_w) for trans, _w in zip(self.transforms, w)]  # (nl,), (nk, ch * w * h)
         return w
-
-
-class KLDistiller(nn.Module):
-    def __init__(self, T):
-        super().__init__()
-        self.T = T
-        self.kl_div = nn.KLDivLoss(reduction='batchmean')
-
-    def forward(self, s_logit, t_logit):
-        loss = self.kl_div(
-            F.log_softmax(s_logit / self.T, dim=1),
-            F.softmax(t_logit.detach() / self.T, dim=1),
-        ) * self.T * self.T
-        return loss
-
 
 

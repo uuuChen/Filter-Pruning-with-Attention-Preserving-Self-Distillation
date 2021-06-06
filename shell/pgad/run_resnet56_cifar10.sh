@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-python3 pgad.py \
+python3 pmsp.py \
     --model resnet56 \
     --dataset cifar10 \
     --batch-size 128 \
@@ -7,9 +7,8 @@ python3 pgad.py \
     --schedule 60 120 160 \
     --lr-drops 0.2 0.2 0.2 \
     --prune-rates 0.6 \
-    --prune-mode filter-n-g-gm-1 \
+    --prune-mode filter-gm \
     --samp-batches 10 \
-    --dist-mode all-dist \
-    --s-load-model-path saves/resnet56_cifar10/initial_train/model_epochs_163.pt \
+    --s-load-model-path saves/resnet56_cifar10/initial_train/model_epochs_1.pt \
     --seed 8152 \
 

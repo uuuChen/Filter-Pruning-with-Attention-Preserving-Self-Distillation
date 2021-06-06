@@ -35,6 +35,9 @@ class ResNetBasicblock(nn.Module):
         self.downsample = downsample
 
     def forward(self, x):
+        feat = list()
+        if isinstance(x, tuple):
+            x, feat = x
         residual = x
 
         basicblock = self.conv_a(x)
@@ -47,7 +50,9 @@ class ResNetBasicblock(nn.Module):
         if self.downsample is not None:
             residual = self.downsample(x)
 
-        return F.relu(residual + basicblock, inplace=True)
+        basicblock = F.relu(residual + basicblock, inplace=True)
+        feat.append(basicblock)
+        return basicblock, feat
 
 
 class CifarResNet(nn.Module):
@@ -107,15 +112,28 @@ class CifarResNet(nn.Module):
 
         return nn.Sequential(*layers)
 
-    def forward(self, x):
+    def forward(self, x, is_group_feat=False, is_block_feat=False):
         x = self.conv_1_3x3(x)
         x = F.relu(self.bn_1(x), inplace=True)
-        x = self.stage_1(x)
-        x = self.stage_2(x)
-        x = self.stage_3(x)
+        g0 = x
+
+        x, f1 = self.stage_1(x)
+        g1 = x
+        x, f2 = self.stage_2(x)
+        g2 = x
+        x, f3 = self.stage_3(x)
+        g3 = x
+
         x = self.avgpool(x)
         x = x.view(x.size(0), -1)
-        return self.classifier(x)
+        g4 = x
+        x = self.classifier(x)
+
+        if is_group_feat:
+            return [g0, g1, g2, g3, g4], x
+        elif is_block_feat:
+            return [g0] + f1 + f2 + f3 + [g4], x
+        return x
 
 
 def resnet20(num_classes=10):
