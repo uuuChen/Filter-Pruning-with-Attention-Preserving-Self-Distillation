@@ -1,6 +1,8 @@
 
 from __future__ import print_function
 
+import numpy as np
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -16,7 +18,6 @@ class MultiSPDistiller(nn.Module):
         # Shape of s_f : (s_nl,), (bs, s_ch, s_w, s_h)
         # Shape of t_f : (t_nl,), (bs, t_ch, t_w, t_h)
         # --------------------------------------------
-        bs = s_f[0].shape[0]
         s_nl = len(s_f)
         t_nl = len(t_f)
 
@@ -26,7 +27,7 @@ class MultiSPDistiller(nn.Module):
         s_mtx = torch.unsqueeze(s_mtx, dim=1).repeat(1, t_nl, 1, 1)  # (s_nl, t_nl, bs, bs)
         t_mtx = torch.unsqueeze(t_mtx, dim=0).repeat(s_nl, 1, 1, 1)  # (s_nl, t_nl, bs, bs)
 
-        loss = torch.pow(s_mtx - t_mtx, 2).view(-1, 1).sum(0) / (bs * bs)
+        loss = (s_mtx - t_mtx).pow(2).view(s_nl, -1).mean(1).sum()  # (1,)
         return loss
 
     def get_sim_matrix(self, f):
@@ -36,4 +37,5 @@ class MultiSPDistiller(nn.Module):
         f = f.view(f.shape[0], -1)  # (bs, s_ch * s_w * sh)
         n_f = F.normalize(f, dim=1)  # (bs, s_ch * s_w * sh)
         mtx = torch.matmul(n_f, torch.t(n_f))  # (bs, bs)
-        return mtx
+        n_mtx = F.normalize(mtx, dim=1)  # (bs, bs)
+        return n_mtx
