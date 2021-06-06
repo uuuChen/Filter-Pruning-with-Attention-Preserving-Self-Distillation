@@ -1,7 +1,6 @@
 import argparse
 import os
 import sys
-import math
 import time
 
 from helpers.utils import (
@@ -9,7 +8,6 @@ from helpers.utils import (
     get_device,
     accuracy,
     load_model,
-    save_model,
     print_nonzeros,
     set_seeds,
     Logger
@@ -19,14 +17,15 @@ import models
 from helpers.trainer import Trainer
 from helpers.pruner import FiltersPruner
 from distillers_zoo import (
-    MultiSPDistiller,
-    KLDistiller
+    MultiSimilarity,
+    KLDistiller,
+    Similarity,
+    Attention,
 )
 
 from tensorboardX import SummaryWriter
 import torch
 import torch.optim as optim
-import torch.nn.functional as F
 import torch.nn as nn
 
 
@@ -79,7 +78,7 @@ class PMSPModelTrainer(Trainer):
         self.do_soft_prune = self.args.soft_prune
         self.criterion_cls = nn.CrossEntropyLoss()
         self.criterion_div = KLDistiller(self.args.kd_T)
-        self.criterion_kd = MultiSPDistiller()
+        self.criterion_kd, self.is_group, self.is_block = self._init_kd(self.args.distill)
 
         self.s_model_pruner = FiltersPruner(
             self.s_model,
@@ -105,6 +104,36 @@ class PMSPModelTrainer(Trainer):
                 new_grad_arr = ori_grad_arr * conv_mask[name]
                 grad.data = torch.from_numpy(new_grad_arr).to(self.device)
 
+    def _init_kd(self, method):
+        is_group = False
+        is_block = False
+        if method == 'msp':
+            is_block = True
+            criterion = MultiSimilarity()
+        elif method == 'at':
+            is_group = True
+            criterion = Attention()
+        elif method == 'sp':
+            is_group = True
+            criterion = Similarity()
+        else:
+            raise NotImplementedError(method)
+        return criterion, is_group, is_block
+
+    def _get_dist_feat(self, method, s_feat, t_feat):
+        if method == 'msp':
+            s_f = s_feat
+            t_f = t_feat[-3:]
+        elif method == 'at':
+            s_f = s_feat[1:-1]  # Get features g1 ~ g4
+            t_f = s_feat[1:-1]  # Get features g1 ~ g4
+        elif method == 'sp':
+            s_f = [s_feat[-2]]  # Get g3 only
+            t_f = [s_feat[-2]]  # Get g3 only
+        else:
+            raise NotImplementedError(method)
+        return s_f, t_f
+
     def _get_loss_and_backward(self, batch):
         input, target = batch
 
@@ -116,13 +145,9 @@ class PMSPModelTrainer(Trainer):
                 print_nonzeros(self.s_model)
 
         # Do different kinds of distillation according to "args.distill"
-        s_feat, s_logit = self.s_model(input, is_block_feat=True)
-        t_feat, t_logit = self.t_model(input, is_block_feat=True)
-        if self.args.distill == 'msp':
-            s_f = s_feat
-            t_f = t_feat[-3:]
-        else:
-            raise NotImplementedError(self.args.distill)
+        s_feat, s_logit = self.s_model(input, is_group_feat=self.is_group, is_block_feat=self.is_block)
+        t_feat, t_logit = self.t_model(input, is_group_feat=self.is_group, is_block_feat=self.is_block)
+        s_f, t_f = self._get_dist_feat(self.args.distill, s_feat, t_feat)
 
         loss_cls = self.criterion_cls(s_logit, target)
         loss_div = self.criterion_div(s_logit, t_logit)

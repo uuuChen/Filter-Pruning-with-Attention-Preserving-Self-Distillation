@@ -1,14 +1,9 @@
-
-from __future__ import print_function
-
-import numpy as np
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 
-class MultiSPDistiller(nn.Module):
+class MultiSimilarity(nn.Module):
     """Multiple layers of similarity-preserving knowledge Distillation"""
     def __init__(self):
         super().__init__()
