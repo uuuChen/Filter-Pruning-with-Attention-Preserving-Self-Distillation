@@ -21,6 +21,7 @@ from distillers_zoo import (
     KLDistiller,
     Similarity,
     Attention,
+    MultiAttention,
 )
 
 from tensorboardX import SummaryWriter
@@ -110,12 +111,15 @@ class PMSPModelTrainer(Trainer):
         if method == 'msp':
             is_block = True
             criterion = MultiSimilarity()
-        elif method == 'at':
-            is_group = True
-            criterion = Attention()
         elif method == 'sp':
             is_group = True
             criterion = Similarity()
+        elif method == 'mat':
+            is_block = True
+            criterion = MultiAttention()
+        elif method == 'at':
+            is_group = True
+            criterion = Attention()
         else:
             raise NotImplementedError(method)
         return criterion, is_group, is_block
@@ -124,9 +128,12 @@ class PMSPModelTrainer(Trainer):
         if method == 'msp':
             s_f = s_feat
             t_f = t_feat[-3:]
+        elif method == 'mat':
+            s_f = s_feat[1:-1]
+            t_f = t_feat[1:-1]
         elif method == 'at':
-            s_f = s_feat[1:-1]  # Get features g1 ~ g4
-            t_f = s_feat[1:-1]  # Get features g1 ~ g4
+            s_f = s_feat[1:-1]  # Get features g1 ~ g3
+            t_f = s_feat[1:-1]  # Get features g1 ~ g3
         elif method == 'sp':
             s_f = [s_feat[-2]]  # Get g3 only
             t_f = [s_feat[-2]]  # Get g3 only
