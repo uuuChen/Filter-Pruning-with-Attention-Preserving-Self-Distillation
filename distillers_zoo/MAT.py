@@ -21,20 +21,22 @@ class MultiAttention(nn.Module):
         # Shape of s_f : (bs, s_ch, s_w, s_w)
         # Shape of t_g : (t_nl,), (bs, t_ch, t_w, t_w)
         # --------------------------------------------
-        vals = torch.stack([self.at_loss(self.s_sample(s_f, t_f), t_f) for t_f in t_g])  # (t_nl,)
+        d = dict()
+        vals = torch.stack([self.at_loss(self.s_sample(s_f, t_f, d), t_f) for t_f in t_g])  # (t_nl,)
         d_vals = vals.detach()
-        d_vals = -1 * d_vals + 2 * torch.mean(d_vals)  # (t_nl,). Make the mean be same but get opposite order
-        atts = F.softmax(d_vals / torch.mean(d_vals), dim=0)  # (t_nl,)
+        atts = F.softmax(-1 * d_vals / torch.mean(d_vals), dim=0)  # (t_nl,)
         loss = torch.mean(vals * atts)  # (1,)
         return loss
 
-    def s_sample(self, s_f, t_f):
+    def s_sample(self, s_f, t_f, d):
         # --------------------------------------------
         # Shape of s_f : (bs, s_ch, s_w, s_w)
         # Shape of t_f : (bs, t_ch, t_w, t_w)
         # --------------------------------------------
         t_w = t_f.shape[2]
-        return F.adaptive_avg_pool2d(s_f, (t_w, t_w))  # (bs, s_ch, t_w, t_w)
+        if t_w not in d:  # Reuse the result of "adaptive_avg_pool2d" For speed optimization
+            d[t_w] = F.adaptive_avg_pool2d(s_f, (t_w, t_w))  # (bs, s_ch, t_w, t_w)
+        return d[t_w]
 
     def at_loss(self, s_f, t_f):
         # --------------------------------------------

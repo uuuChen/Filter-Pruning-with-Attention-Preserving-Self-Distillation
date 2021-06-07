@@ -51,7 +51,7 @@ parser.add_argument('--use-actPR', action='store_true', default=False)  # Comput
 parser.add_argument('--use-greedy', action='store_true', default=False)  # Prune filters by greedy or independent
 parser.add_argument('--evaluate', action='store_true', default=False)
 parser.add_argument('--prune-interval', type=int, default=sys.maxsize)  # We will only prune once by default
-parser.add_argument('--distill', type=str, default='msp')  # Which distillation methods to use
+parser.add_argument('--distill', type=str, default='None')  # Which distillation methods to use
 parser.add_argument('--kd-T', type=float, default=4.0)  # Temperature for KL distillation
 parser.add_argument('--alpha', type=float, default=0.9)
 parser.add_argument('--beta', type=float, default=50.0)  # For custom-method distillation
@@ -76,10 +76,12 @@ class PMSPModelTrainer(Trainer):
         self.writer = writer
 
         self.do_prune = self.args.prune_mode is not 'None'
+        self.do_dist = self.args.distill is not 'None'
         self.do_soft_prune = self.args.soft_prune
         self.criterion_cls = nn.CrossEntropyLoss()
         self.criterion_div = KLDistiller(self.args.kd_T)
-        self.criterion_kd, self.is_group, self.is_block = self._init_kd(self.args.distill)
+        if self.do_dist:
+            self.criterion_kd, self.is_group, self.is_block = self._init_kd(self.args.distill)
 
         self.s_model_pruner = FiltersPruner(
             self.s_model,
@@ -96,7 +98,7 @@ class PMSPModelTrainer(Trainer):
         self.t_model.eval()
         self.t_model = self.t_model.to(self.device)
 
-    def _mask_pruned_weight_grad(self):
+    def _mask_prune_weight_grad(self):
         conv_mask = self.s_model_pruner.conv_mask
         for name, module in self.s_model.named_modules():
             if name in conv_mask:
@@ -151,28 +153,34 @@ class PMSPModelTrainer(Trainer):
                 self.last_epoch = self.cur_epoch
                 print_nonzeros(self.s_model)
 
-        # Do different kinds of distillation according to "args.distill"
-        s_feat, s_logit = self.s_model(input, is_group_feat=self.is_group, is_block_feat=self.is_block)
-        t_feat, t_logit = self.t_model(input, is_group_feat=self.is_group, is_block_feat=self.is_block)
-        s_f, t_f = self._get_dist_feat(self.args.distill, s_feat, t_feat)
-
-        loss_cls = self.criterion_cls(s_logit, target)
-        loss_div = self.criterion_div(s_logit, t_logit)
-        loss_kd = self.criterion_kd(s_f, t_f)
-
-        total_loss = loss_cls + loss_div * self.args.alpha + loss_kd * self.args.beta
-        total_loss.backward()
+        # Get the total_loss and backward
+        if self.do_dist:
+            # Do different kinds of distillation according to "args.distill"
+            s_feat, s_logit = self.s_model(input, is_group_feat=self.is_group, is_block_feat=self.is_block)
+            t_feat, t_logit = self.t_model(input, is_group_feat=self.is_group, is_block_feat=self.is_block)
+            s_f, t_f = self._get_dist_feat(self.args.distill, s_feat, t_feat)
+            loss_cls = self.criterion_cls(s_logit, target)
+            loss_div = self.criterion_div(s_logit, t_logit)
+            loss_kd = self.criterion_kd(s_f, t_f)
+            loss = loss_cls + loss_div * self.args.alpha + loss_kd * self.args.beta
+        else:
+            # Normal training
+            s_logit = self.s_model(input)
+            loss_cls = self.criterion_cls(s_logit, target)
+            loss_div = loss_kd = torch.zeros(1).to(self.device)
+            loss = loss_cls
+        loss.backward()
 
         # Set the gradient of the pruned weights to 0 if it's in the "hard prune mode"
         if self.do_prune and not self.do_soft_prune:
-            self._mask_pruned_weight_grad()
+            self._mask_prune_weight_grad()
 
         # Get performance metrics
         top1, top5 = accuracy(s_logit, target, topk=(1, 5))
         self.writer.add_scalars(
             'data/scalar_group', {
-                'total_loss': total_loss.item(),
-                'pred_loss': loss_cls.item(),
+                'total_loss': loss.item(),
+                'cls_loss': loss_cls.item(),
                 'div_loss': loss_div.item(),
                 'kd_loss': loss_kd.item(),
                 'lr': self.cur_lr,
@@ -180,7 +188,7 @@ class PMSPModelTrainer(Trainer):
                 'top5': top5
             }, self.global_step
         )
-        return total_loss, top1, top5
+        return loss, top1, top5
 
     def _evaluate(self, batch):
         input_var, target_var = batch
