@@ -30,8 +30,8 @@ class FilterAttentionDistiller(nn.Module):
 
     def _update_w(self, s_w, attn_w):
         # --------------------------------------------
-        # Shape of s_w    : (nl,), (s_nk, s_ch, s_w, s_h)
-        # Shape of attn_w : (nl,), (s_nk, s_ch * s_w * s_h)
+        # Shape of s_w    : (nl,), (s_nk, s_ch, s_h, s_w)
+        # Shape of attn_w : (nl,), (s_nk, s_ch * s_h * s_w)
         # --------------------------------------------
         upd_w = [Add.apply(s, a) for s, a in zip(s_w, attn_w)]
         return upd_w
@@ -63,13 +63,13 @@ class FilterAttention(nn.Module):
 
     def forward(self, s_w, t_w):
         # --------------------------------------------
-        # Shape of s_w : (nl,), (s_nk, s_ch, s_w, s_h)
-        # Shape of t_w : (nl,), (t_nk, t_ch, t_w, t_h)
+        # Shape of s_w : (nl,), (s_nk, s_ch, s_h, s_w)
+        # Shape of t_w : (nl,), (t_nk, t_ch, t_h, t_w)
         # --------------------------------------------
 
         # Shape of s_key : (nl,), (s_nk, adapt_dim)
         # Shape of t_qry : (nl,), (t_nk, adapt_dim)
-        # Shape of value : (nl,), (t_nk, s_ch * s_w * s_h)
+        # Shape of value : (nl,), (t_nk, s_ch * s_h * s_w)
         s_key = self.s_enc_trans(s_w)
         t_qry = self.t_enc_trans(t_w)
         value = self.t_dec_trans(t_qry)
@@ -83,7 +83,7 @@ class FilterAttention(nn.Module):
 
         # Shape of logit  : (nl,), (s_nk, t_nk)
         # Shape of attn   : (nl,), (s_nk, t_nk)
-        # Shape of attn_w : (nl,), (s_nk, s_ch * s_w * s_h)
+        # Shape of attn_w : (nl,), (s_nk, s_ch * s_h * s_w)
         logit = [torch.einsum("sta,ao->st", _pair, _a) for _pair, _a in zip(pair, self.adapt_params)]
         attn = [F.softmax(F.leaky_relu(_logit, negative_slope=0.2), dim=1) for _logit in logit]
         attn_w = [torch.matmul(_attn, _val) for _attn, _val in zip(attn, value)]
@@ -113,7 +113,7 @@ class EncodingTransform(nn.Module):
 
     def forward(self, w):
         # --------------------------------------------
-        # Shape of w : (nl,), (nk, ch, w, h)
+        # Shape of w : (nl,), (nk, ch, h, w)
         # --------------------------------------------
         w = [trans(_w.view(_w.shape[0], -1)) for trans, _w in zip(self.transforms, w)]  # (nl,), (nk, adapt_dim)
         return w
@@ -128,7 +128,7 @@ class DecodingTransform(nn.Module):
         # --------------------------------------------
         # Shape of w : (nl,), (nk, adapt_dim)
         # --------------------------------------------
-        w = [trans(_w) for trans, _w in zip(self.transforms, w)]  # (nl,), (nk, ch * w * h)
+        w = [trans(_w) for trans, _w in zip(self.transforms, w)]  # (nl,), (nk, ch * h * w)
         return w
 
 

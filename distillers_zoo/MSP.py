@@ -10,8 +10,8 @@ class MultiSimilarity(nn.Module):
 
     def forward(self, s_g, t_g):
         # --------------------------------------------
-        # Shape of s_g : (s_nl,), (bs, s_ch, s_w, s_h)
-        # Shape of t_g : (t_nl,), (bs, t_ch, t_w, t_h)
+        # Shape of s_g : (s_nl,), (bs, s_ch, s_h, s_w)
+        # Shape of t_g : (t_nl,), (bs, t_ch, t_h, t_w)
         # --------------------------------------------
         s_nl = len(s_g)
         t_nl = len(t_g)
@@ -27,25 +27,25 @@ class MultiSimilarity(nn.Module):
 
     def get_sim_matrix(self, f):
         # --------------------------------------------
-        # Shape of f : (bs, ch, w, h)
+        # Shape of f : (bs, ch, h, w)
         # --------------------------------------------
-        f = f.view(f.shape[0], -1)  # (bs, ch * w * h)
-        n_f = F.normalize(f, dim=1)  # (bs, ch * w * h)
+        f = f.view(f.shape[0], -1)  # (bs, ch * h * w)
+        n_f = F.normalize(f, dim=1)  # (bs, ch * h * w)
         mtx = torch.matmul(n_f, torch.t(n_f))  # (bs, bs)
         n_mtx = F.normalize(mtx, dim=1)  # (bs, bs)
         return n_mtx
 
     def get_sim_matrix_v2(self, f):
         # --------------------------------------------
-        # Shape of f : (bs, ch, w, h)
+        # Shape of f : (bs, ch, h, w)
         # --------------------------------------------
-        a_f = self.at(f)  # (bs, w * h)
+        a_f = self.at(f)  # (bs, h * w)
         mtx = torch.matmul(a_f, torch.t(a_f))  # (bs, bs)
         n_mtx = F.normalize(mtx, dim=1)  # (bs, bs)
         return n_mtx
 
     def at(self, f):
         # --------------------------------------------
-        # Shape of f : (bs, ch, w, h)
+        # Shape of f : (bs, ch, h, w)
         # --------------------------------------------
-        return F.normalize(f.pow(2).mean(1).view(f.size(0), -1))  # (bs, w * h)
+        return F.normalize(f.pow(2).mean(1).view(f.size(0), -1))  # (bs, h * w)

@@ -10,19 +10,19 @@ class Similarity(nn.Module):
 
     def forward(self, s_g, t_g):
         # --------------------------------------------
-        # Shape of s_g : (s_nl,), (bs, s_ch, s_w, s_h)
-        # Shape of t_g : (t_nl,), (bs, t_ch, t_w, t_h)
+        # Shape of s_g : (s_nl,), (bs, s_ch, s_h, s_w)
+        # Shape of t_g : (t_nl,), (bs, t_ch, t_h, t_w)
         # --------------------------------------------
         return torch.sum(torch.stack([self.similarity_loss(s_f, t_f) for s_f, t_f in zip(s_g, t_g)]))  # (1,)
 
     def similarity_loss(self, s_f, t_f):
         # --------------------------------------------
-        # Shape of s_f : (bs, s_ch, s_w, s_h)
-        # Shape of t_f : (bs, t_ch, t_w, t_h)
+        # Shape of s_f : (bs, s_ch, s_h, s_w)
+        # Shape of t_f : (bs, t_ch, t_h, t_w)
         # --------------------------------------------
         bs = s_f.shape[0]
-        s_f = s_f.view(bs, -1)  # (bs, s_ch * s_w * s_h)
-        t_f = t_f.view(bs, -1)  # (bs, t_ch * t_w * t_h)
+        s_f = s_f.view(bs, -1)  # (bs, s_ch * s_h * s_w)
+        t_f = t_f.view(bs, -1)  # (bs, t_ch * t_h * t_w)
 
         s_g = torch.mm(s_f, torch.t(s_f))  # (bs, bs)
         s_g = torch.nn.functional.normalize(s_g)  # (bs, bs)

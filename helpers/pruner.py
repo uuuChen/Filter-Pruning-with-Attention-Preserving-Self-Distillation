@@ -30,20 +30,15 @@ class FiltersPruner(object):
         self.conv_mask = dict()
         self.use_grad = False
 
-    def _get_prune_indices(self, conv_name, conv_module, prune_rate, mode='filter-a'):
-        def get_gm_dists(arr):
-            return np.array([np.sum(np.power(ele - arr, 2)) for ele in arr])
+    def _get_prune_indices(self, name, module, prune_rate, mode='filter-a'):
+        f_w = module.weight.data.cpu().numpy()  # The weight of filters
+        n_f = f_w.shape[0]
+        f_w = f_w.reshape(n_f, -1)
 
-        def get_l1_scores(arr2d):
-            return np.sum(np.abs(arr2d), axis=1)
-
-        f_w = conv_module.weight.data.cpu().numpy()  # The weight of filters
-        f_nums = f_w.shape[0]
-        flat_f_w = f_w.reshape(f_nums, -1)
-        flat_f_g = None
+        f_g = None
         if self._get_use_grad():
-            f_g = conv_module.weight.grad.data.cpu().numpy()  # The gradient of filters
-            flat_f_g = f_g.reshape(f_nums, -1)
+            f_g = module.weight.grad.data.cpu().numpy()  # The gradient of filters
+            f_g = f_g.reshape(n_f, -1)
 
         # ------------------------------------
         # In mode:
@@ -52,43 +47,49 @@ class FiltersPruner(object):
         #    -a  : Use activation-base
         #    -gm : Use geometric-median-base
         # ------------------------------------
+        def get_gm_dists(arr):
+            return np.array([np.sum(np.power(ele - arr, 2)) for ele in arr])
+
+        def get_l1_scores(arr2d):
+            return np.sum(np.abs(arr2d), axis=1)
+
         if 'filter-a' in mode:
-            f_scores = get_l1_scores(flat_f_w)
+            f_scores = get_l1_scores(f_w)
         elif 'filter-g-a' in mode:
-            f_scores = np.sum(np.abs(flat_f_w) * np.abs(flat_f_g), axis=1)
+            f_scores = np.sum(np.abs(f_w) * np.abs(f_g), axis=1)
         elif 'filter-n-g-a' in mode:
-            f_scores = np.sum(min_max_scalar(np.abs(flat_f_w)) + min_max_scalar(np.abs(flat_f_g)), axis=1)
+            f_scores = np.sum(min_max_scalar(np.abs(f_w)) + min_max_scalar(np.abs(f_g)), axis=1)
         elif 'filter-n-g-a-2' in mode:
-            f_scores = min_max_scalar(get_l1_scores(flat_f_w)) + min_max_scalar(get_l1_scores(flat_f_g))
+            f_scores = min_max_scalar(get_l1_scores(f_w)) + min_max_scalar(get_l1_scores(f_g))
         elif 'filter-gm' in mode:
-            f_scores = get_gm_dists(flat_f_w)
+            f_scores = get_gm_dists(f_w)
         elif 'filter-g-gm-1' in mode:
-            f_scores = get_gm_dists(flat_f_w) * get_l1_scores(flat_f_g)
+            f_scores = get_gm_dists(f_w) * get_l1_scores(f_g)
         elif 'filter-g-gm-2' in mode:
-            f_scores = get_gm_dists(flat_f_w) + get_l1_scores(flat_f_g)
+            f_scores = get_gm_dists(f_w) + get_l1_scores(f_g)
         elif 'filter-g-gm-3' in mode:
-            f_scores = get_gm_dists(flat_f_w) * get_l1_scores(flat_f_g) * get_l1_scores(flat_f_w)
+            f_scores = get_gm_dists(f_w) * get_l1_scores(f_g) * get_l1_scores(f_w)
         elif 'filter-n-g-gm-1' in mode:
-            f_scores = min_max_scalar(get_gm_dists(flat_f_w)) + min_max_scalar(get_l1_scores(flat_f_g))
+            f_scores = min_max_scalar(get_gm_dists(f_w)) + min_max_scalar(get_l1_scores(f_g))
         elif 'filter-n-g-gm-2' in mode:
-            f_scores = (min_max_scalar(get_gm_dists(flat_f_w)) + min_max_scalar(get_l1_scores(flat_f_g)) +
-                        min_max_scalar(get_l1_scores(flat_f_w)))
+            f_scores = (min_max_scalar(get_gm_dists(f_w)) + min_max_scalar(get_l1_scores(f_g)) +
+                        min_max_scalar(get_l1_scores(f_w)))
         elif 'filter-n-g-gm-3' in mode:
-            f_scores = min_max_scalar(get_gm_dists(flat_f_w)) * min_max_scalar(get_l1_scores(flat_f_g))
+            f_scores = min_max_scalar(get_gm_dists(f_w)) * min_max_scalar(get_l1_scores(f_g))
         else:
             raise NameError
-        rank_f_indices = np.argsort(f_scores)
-        prune_f_nums = int(round(f_nums * (1.0 - prune_rate)))
-        prune_f_indices = np.sort(rank_f_indices[:prune_f_nums])
-        self.logger.log(f'{conv_name:10} Prune-F-Indices : {prune_f_indices}')
-        return prune_f_indices
+        rank_indices = np.argsort(f_scores)
+        n_prune = int(round(n_f * (1.0 - prune_rate)))
+        prune_indices = np.sort(rank_indices[:n_prune])
+        self.logger.log(f'{name:10} Prune-F-Indices : {prune_indices}')
+        return prune_indices
 
     @staticmethod
     def _prune_by_threshold(module, threshold):
-        device = module.weight.device
-        tensor = module.weight.data.cpu().numpy()
+        weight = module.weight
+        tensor = weight.data.cpu().numpy()
         mask = np.where(abs(tensor) < threshold, 0, 1)
-        module.weight.data = torch.from_numpy(tensor * mask).to(device)
+        weight.data = torch.from_numpy(tensor * mask).to(weight.device)
 
     @staticmethod
     def _prune_by_indices(module, indices, dim=0, prune_weight=True, prune_bias=True, prune_grad=True):
@@ -125,7 +126,7 @@ class FiltersPruner(object):
         for name, module in self.model.named_modules():
             if isinstance(module, torch.nn.Conv2d):
                 tensor = module.weight.data.cpu().numpy()
-                alive = tensor[np.nonzero(tensor)]  # flattened array of nonzero values
+                alive = tensor[np.nonzero(tensor)]  # Flattened array of nonzero values
                 percentile_value = np.percentile(abs(alive), prune_rates[i])
                 print(f'Pruning {name} with threshold : {percentile_value}')
                 self._prune_by_threshold(module, percentile_value)
@@ -150,20 +151,20 @@ class FiltersPruner(object):
     def _set_batches_weight_grad(self):
         params = list(self.model.parameters())
         train_iter = iter(self.train_loader)
-        input_var, target_var = [t.to(self.device) for t in next(train_iter)]
+        input, target = [t.to(self.device) for t in next(train_iter)]
         for i, batch in enumerate(train_iter, start=1):
             if i == self.samp_batches:
                 break
-            _input_var, _target_var = [t.to(self.device) for t in batch]
-            input_var = torch.cat((input_var, _input_var), dim=0)
-            target_var = torch.cat((target_var, _target_var), dim=0)
+            inp, tar = [t.to(self.device) for t in batch]
+            input = torch.cat((input, inp), dim=0)
+            target = torch.cat((target, tar), dim=0)
         self.optimizer.zero_grad()
-        output_var = self.model(input_var)
-        loss = self.cross_entropy(output_var, target_var)
+        logit = self.model(input)
+        loss = self.cross_entropy(logit, target)
         loss.backward()
-        acc_grads = np.array([p.grad for p in params], dtype=object)
-        for p, acc_grad in zip(params, acc_grads):
-            p.grad.data = acc_grad
+        grads = np.array([p.grad for p in params], dtype=object)
+        for p, grad in zip(params, grads):
+            p.grad.data = grad
 
     def _prune_filters_and_channels(self, prune_rates, mode='filter-norm'):
         i = 0
@@ -194,44 +195,44 @@ class FiltersPruner(object):
         if self._get_use_grad():
             self.optimizer.zero_grad()
 
-    def _get_actual_prune_rates(self, ideal_prune_rates, verbose=False):
+    def _get_actual_prune_rates(self, prune_rates, verbose=False):
         """
         # Suppose the model prunes some filters (filters, :, :, :).
-        # ---------------------------------------------
+        # ----------------------------------------------------------
         # If the filter of the previous layer is prune, the channel corresponding to this layer must also be
         # prune
-        # ---------------------------------------------
-        # Suppose Conv Shape: (fn, cn, kh, kw)
-        # Then:
-        #   ideal_prune_rate = ((fn * ideal_f_prune_rate) * (cn - n_prune_filters) * kh * kw) / (fn * cn * kh
-        #   * kw)
-        $ Then:
-        #   ideal_f_prune_rate = ideal_prune_rate * (n_channels / (n_channels - n_prune_filters))
+        # ----------------------------------------------------------
+        # Suppose Conv Shape: (n_k, n_c, h, w)
         #
-        # "n_prune_filters" is the number of prune filters last layer
-        # ---------------------------------------------
+        # Then:
+        #   prune_rate = ((n_k * act_prune_rate) * (n_c - n_prune_f) * n_k * kw) / (n_k * n_c * h * w)
+        #
+        $ Then:
+        #   act_prune_rate = prune_rate * (n_c / (n_c - n_prune_f))
+        #
+        # "n_prune_f" is the number of prune filters last layer
+        # ----------------------------------------------------------
         """
         i = 0
-        n_prune_filters = None
-        prune_rates = list()
+        n_prune_f = None
+        act_prune_rates = list()
         for name, module in self.model.named_modules():
             if isinstance(module, torch.nn.Conv2d):
-                n_filters, n_channels = module.weight.shape[0:2]
+                n_k, n_c = module.weight.shape[0:2]
                 if i == 0:
-                    ideal_f_prune_rate = ideal_prune_rates[i]
+                    act_prune_rate = prune_rates[i]
                 else:
-                    ideal_f_prune_rate = ideal_prune_rates[i] * (n_channels / (n_channels - n_prune_filters))
-                n_prune_filters = round(n_filters * (1.0 - ideal_f_prune_rate))
-                act_f_prune_rate = np.clip(1.0 - (n_prune_filters / n_filters), 0.0, 1.0)
-                f_bias = abs(act_f_prune_rate - ideal_f_prune_rate)
-                prune_rates.append(act_f_prune_rate)
+                    act_prune_rate = prune_rates[i] * (n_c / (n_c - n_prune_f))
+                act_prune_rate = np.clip(act_prune_rate, 0.0, 1.0)
+                n_prune_f = round(n_k * (1.0 - act_prune_rate))
+                bias = abs(n_prune_f / n_k - act_prune_rate)
+                act_prune_rates.append(act_prune_rate)
                 i += 1
                 if verbose:
-                    print(f'{name:6} | original filter nums: {n_filters:4} | prune filter nums: '
-                          f'{n_prune_filters:4} | target filter prune rate: {ideal_f_prune_rate * 100.:.2f}'
-                          f'% | actual filter prune rate : {act_f_prune_rate * 100.:.2f}% | filter bias: '
-                          f'{f_bias * 100.:.2f}%')
-        return prune_rates
+                    print(f'{name:6} | original filter nums: {n_k:4} | prune filter nums: '
+                          f'{n_prune_f:4} | actual filter prune rate : {act_prune_rate * 100.:.2f}% | '
+                          f' bias: {bias * 100.:.2f}%')
+        return act_prune_rates
 
     @staticmethod
     def get_left_dict(model):
@@ -251,16 +252,16 @@ class FiltersPruner(object):
     def get_conv_mask(self):
         return self.conv_mask
 
-    def prune(self, mode, ideal_prune_rates):
-        ideal_prune_rates = self._check_prune_rates(ideal_prune_rates)
-        if 'percentile' in mode:
-            self._prune_by_percentile(ideal_prune_rates)
-        elif 'filter' in mode:
-            prune_rates = ideal_prune_rates
+    def prune(self, mode, prune_rates):
+        prune_rates = self._check_prune_rates(prune_rates)
+        is_prune_f = 'filter' in mode
+        if is_prune_f:
             if self.use_actPR:
-                prune_rates = self._get_actual_prune_rates(ideal_prune_rates)
+                prune_rates = self._get_actual_prune_rates(prune_rates)
             self._set_use_grad(val='-g-' in mode)
             self._prune_filters_and_channels(prune_rates, mode=mode)
+        else:
+            self._prune_by_percentile(prune_rates)
 
 
 

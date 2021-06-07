@@ -15,28 +15,28 @@ class Attention(nn.Module):
 
     def forward(self, s_g, t_g):
         # --------------------------------------------
-        # Shape of s_g (group) : (nl,), (bs, s_ch, s_w, s_w)
-        # Shape of t_g (group) : (nl,), (bs, t_ch, t_w, t_w)
+        # Shape of s_g (group) : (nl,), (bs, s_ch, s_h, s_h)
+        # Shape of t_g (group) : (nl,), (bs, t_ch, t_h, t_h)
         # --------------------------------------------
         loss = torch.sum(torch.stack([self.at_loss(s_f, t_f) for s_f, t_f in zip(s_g, t_g)]))  # (1,)
         return loss
 
     def at_loss(self, s_f, t_f):
         # --------------------------------------------
-        # Shape of s_f : (bs, s_ch, s_w, s_w)
-        # Shape of t_f : (bs, t_ch, t_w, t_w)
+        # Shape of s_f : (bs, s_ch, s_h, s_h)
+        # Shape of t_f : (bs, t_ch, t_h, t_h)
         # --------------------------------------------
-        s_w, t_w = s_f.shape[2], t_f.shape[2]
-        if s_w > t_w:
-            s_f = F.adaptive_avg_pool2d(s_f, (t_w, t_w))
-        elif s_w < t_w:
-            t_f = F.adaptive_avg_pool2d(t_f, (s_w, s_w))
+        s_h, t_h = s_f.shape[2], t_f.shape[2]
+        if s_h > t_h:
+            s_f = F.adaptive_avg_pool2d(s_f, (t_h, t_h))
+        elif s_h < t_h:
+            t_f = F.adaptive_avg_pool2d(t_f, (s_h, s_h))
         else:
             pass
         return (self.at(s_f) - self.at(t_f)).pow(2).mean()
 
     def at(self, f):
         # --------------------------------------------
-        # Shape of f : (bs, ch, w, w)
+        # Shape of f : (bs, ch, h, h)
         # --------------------------------------------
-        return F.normalize(f.pow(self.p).mean(1).view(f.size(0), -1))  # (bs, w * w)
+        return F.normalize(f.pow(self.p).mean(1).view(f.size(0), -1))  # (bs, h * h)

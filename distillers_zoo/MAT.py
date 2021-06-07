@@ -10,16 +10,16 @@ class MultiAttention(nn.Module):
 
     def forward(self, s_g, t_g):
         # --------------------------------------------
-        # Shape of s_g (group) : (s_nl,), (bs, s_ch, s_w, s_w)
-        # Shape of t_g (group) : (t_nl,), (bs, t_ch, t_w, t_w)
+        # Shape of s_g (group) : (s_nl,), (bs, s_ch, s_h, s_h)
+        # Shape of t_g (group) : (t_nl,), (bs, t_ch, t_h, t_h)
         # --------------------------------------------
         loss = torch.mean(torch.stack([self.s_to_all_t_loss(s_f, t_g) for s_f in s_g]))  # (1,)
         return loss
 
     def s_to_all_t_loss(self, s_f, t_g):
         # --------------------------------------------
-        # Shape of s_f : (bs, s_ch, s_w, s_w)
-        # Shape of t_g : (t_nl,), (bs, t_ch, t_w, t_w)
+        # Shape of s_f : (bs, s_ch, s_h, s_h)
+        # Shape of t_g : (t_nl,), (bs, t_ch, t_h, t_h)
         # --------------------------------------------
         d = dict()
         vals = torch.stack([self.at_loss(self.s_sample(s_f, t_f, d), t_f) for t_f in t_g])  # (t_nl,)
@@ -30,18 +30,18 @@ class MultiAttention(nn.Module):
 
     def s_sample(self, s_f, t_f, d):
         # --------------------------------------------
-        # Shape of s_f : (bs, s_ch, s_w, s_w)
-        # Shape of t_f : (bs, t_ch, t_w, t_w)
+        # Shape of s_f : (bs, s_ch, s_h, s_h)
+        # Shape of t_f : (bs, t_ch, t_h, t_h)
         # --------------------------------------------
-        t_w = t_f.shape[2]
-        if t_w not in d:  # Reuse the result of "adaptive_avg_pool2d" For speed optimization
-            d[t_w] = F.adaptive_avg_pool2d(s_f, (t_w, t_w))  # (bs, s_ch, t_w, t_w)
-        return d[t_w]
+        t_h = t_f.shape[2]
+        if t_h not in d:  # Reuse the result of "adaptive_avg_pool2d" For speed optimization
+            d[t_h] = F.adaptive_avg_pool2d(s_f, (t_h, t_h))  # (bs, s_ch, t_h, t_h)
+        return d[t_h]
 
     def at_loss(self, s_f, t_f):
         # --------------------------------------------
-        # Shape of s_f : (bs, s_ch, t_w, t_w)
-        # Shape of t_f : (bs, t_ch, t_w, t_w)
+        # Shape of s_f : (bs, s_ch, t_h, t_h)
+        # Shape of t_f : (bs, t_ch, t_h, t_h)
         # --------------------------------------------
         return (self.at(s_f) - self.at(t_f)).pow(2).mean()  # (1,)
 
