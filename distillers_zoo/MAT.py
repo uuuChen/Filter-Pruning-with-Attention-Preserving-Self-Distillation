@@ -4,29 +4,42 @@ import torch.nn.functional as F
 
 
 class MultiAttention(nn.Module):
-    def __init__(self, p=2):
+    def __init__(self, window_size=None):
         super().__init__()
-        self.p = p
+        self.w_s = window_size  # Size of the window
 
     def forward(self, s_g, t_g):
         # --------------------------------------------
-        # Shape of s_g (group) : (s_nl,), (bs, s_ch, s_h, s_h)
-        # Shape of t_g (group) : (t_nl,), (bs, t_ch, t_h, t_h)
+        # Shape of s_g (group) : (nl,), (bs, s_ch, s_h, s_h)
+        # Shape of t_g (group) : (nl,), (bs, t_ch, t_h, t_h)
         # --------------------------------------------
-        loss = torch.mean(torch.stack([self.s_to_all_t_loss(s_f, t_g) for s_f in s_g]))  # (1,)
+        loss = torch.mean(torch.stack([self.s_to_all_t_loss(s_f, t_g, i) for i, s_f in enumerate(s_g)]))  # (1,)
         return loss
 
-    def s_to_all_t_loss(self, s_f, t_g):
+    def s_to_all_t_loss(self, s_f, t_g, s_idx):
         # --------------------------------------------
         # Shape of s_f : (bs, s_ch, s_h, s_h)
-        # Shape of t_g : (t_nl,), (bs, t_ch, t_h, t_h)
+        # Shape of t_g : (nl,), (bs, t_ch, t_h, t_h)
         # --------------------------------------------
         d = dict()
-        vals = torch.stack([self.at_loss(self.s_sample(s_f, t_f, d), t_f) for t_f in t_g])  # (t_nl,)
+        vals = torch.stack([self.at_loss(self.s_sample(s_f, t_f, d), t_f) for t_f in self.t_sample(t_g, s_idx)])  # (
+        # w_s,)
         d_vals = vals.detach()
-        atts = F.softmax(-1 * d_vals / torch.mean(d_vals), dim=0)  # (t_nl,)
+        atts = F.softmax(-1 * d_vals / torch.mean(d_vals), dim=0)  # (w_s,)
         loss = torch.mean(vals * atts)  # (1,)
         return loss
+
+    def t_sample(self, t_g, s_idx):
+        # --------------------------------------------
+        # Shape of t_g : (nl,), (bs, t_ch, t_h, t_h)
+        # --------------------------------------------
+        if not self.w_s:
+            return t_g
+        l = s_idx - (self.w_s - 1) // 2
+        r = l + self.w_s
+        l = max(l, 0)
+        r = min(r, len(t_g))
+        return t_g[l:r]
 
     def s_sample(self, s_f, t_f, d):
         # --------------------------------------------
@@ -49,4 +62,4 @@ class MultiAttention(nn.Module):
         # --------------------------------------------
         # Shape of f : (bs, ch, w, w)
         # --------------------------------------------
-        return F.normalize(f.pow(self.p).mean(1).view(f.size(0), -1))  # (bs, w * w)
+        return F.normalize(f.pow(2).mean(1).view(f.size(0), -1))  # (bs, w * w)

@@ -133,7 +133,7 @@ class FiltersPruner(object):
                 i += 1
 
     def _init_conv_mask(self, name, module):
-        self.conv_mask[name] = torch.ones(module.weight.data.shape)
+        self.conv_mask[name] = torch.ones(module.weight.data.shape).to(self.device)
 
     def _set_conv_mask(self, name, prune_indices, dim=0):
         mask_arr = self.conv_mask[name]

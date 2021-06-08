@@ -50,8 +50,10 @@ parser.add_argument('--use-actPR', action='store_true', default=False)  # Comput
 # or not
 parser.add_argument('--use-greedy', action='store_true', default=False)  # Prune filters by greedy or independent
 parser.add_argument('--evaluate', action='store_true', default=False)
-parser.add_argument('--prune-interval', type=int, default=sys.maxsize)  # We will only prune once by default
+parser.add_argument('--prune-interval', type=int, default=sys.maxsize)  # Do pruning process once by default
 parser.add_argument('--distill', type=str, default='None')  # Which distillation methods to use
+parser.add_argument('--window-size', type=int, default=None)  # Window size for "MAT" distillation. Determine how
+# many layers of teacher are going to distill to all layers of students. Use all layers of teacher by default
 parser.add_argument('--kd-T', type=float, default=4.0)  # Temperature for KL distillation
 parser.add_argument('--alpha', type=float, default=0.9)
 parser.add_argument('--beta', type=float, default=50.0)  # For custom-method distillation
@@ -116,7 +118,7 @@ class PMSPModelTrainer(Trainer):
             criterion = Similarity()
         elif method == 'mat':
             is_block = True
-            criterion = MultiAttention()
+            criterion = MultiAttention(window_size=self.args.window_size)
         elif method == 'at':
             is_group = True
             criterion = Attention()
