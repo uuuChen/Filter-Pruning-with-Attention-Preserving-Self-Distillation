@@ -55,21 +55,21 @@ class Trainer(object):
     def _eval_epoch(self):
         self.model.eval()  # Evaluation mode
         iter_bar = tqdm(self.eval_loader, desc='Iter')
-        e_result_vals = None
-        b_result_dict = None
+        e_vals = None  # Epoch result array
+        b_dict = None  # Batch result dict
         for i, batch in enumerate(iter_bar, start=1):
             batch = [t.to(self.device) for t in batch]
             with torch.no_grad():  # Evaluation without gradient calculation
-                b_result_dict = self._evaluate(batch)  # Accuracy to print
-                b_result_vals = np.array(list(b_result_dict.values()))
-            if e_result_vals is None:
-                e_result_vals = [0] * len(b_result_vals)
-            e_result_vals += b_result_vals
+                b_dict = self._evaluate(batch)  # Accuracy to print
+                b_vals = np.array(list(b_dict.values()))
+            if e_vals is None:
+                e_vals = [0] * len(b_vals)
+            e_vals += b_vals
             iter_bar.set_description('Iter')
-        e_result_dict = dict(zip(b_result_dict.keys(), e_result_vals/len(iter_bar)))
-        text = f'[ Epoch {self.cur_epoch} (Test) ] : {e_result_dict}'
+        e_dict = dict(zip(b_dict.keys(), e_vals/len(iter_bar)))
+        text = f'[ Epoch {self.cur_epoch} (Test) ] : {e_dict}'
         self.logger.log(text, verbose=True)
-        return e_result_dict
+        return e_dict
 
     def _adjust_learning_rate(self):
         if self.cur_epoch in self.args.schedule:

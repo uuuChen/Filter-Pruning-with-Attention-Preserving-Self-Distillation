@@ -99,13 +99,11 @@ class PMSPModelTrainer(Trainer):
         self.t_model = self.t_model.to(self.device)
 
     def _mask_prune_weight_grad(self):
-        conv_mask = self.s_model_pruner.conv_mask
+        conv_mask = self.s_model_pruner.get_conv_mask()
         for name, module in self.s_model.named_modules():
             if name in conv_mask:
                 grad = module.weight.grad
-                ori_grad_arr = grad.data.cpu().numpy()
-                new_grad_arr = ori_grad_arr * conv_mask[name]
-                grad.data = torch.from_numpy(new_grad_arr).to(self.device)
+                grad.data = grad.data * conv_mask[name]
 
     def _init_kd(self, method):
         is_group = False
