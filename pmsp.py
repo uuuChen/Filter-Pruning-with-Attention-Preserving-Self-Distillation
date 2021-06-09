@@ -52,21 +52,22 @@ parser.add_argument('--use-greedy', action='store_true', default=False)  # Prune
 parser.add_argument('--evaluate', action='store_true', default=False)
 parser.add_argument('--prune-interval', type=int, default=sys.maxsize)  # Do pruning process once by default
 parser.add_argument('--distill', type=str, default='None')  # Which distillation methods to use
-parser.add_argument('--window-size', type=int, default=None)  # Window size for "MAT" distillation. Determine how
+parser.add_argument('--msp-ts', type=int, default=3)  # Number of sampled teacher layers for "MSP" distillation
+parser.add_argument('--mat-ws', type=int, default=None)  # Window size for "MAT" distillation. Determine how
 # many layers of teacher are going to distill to all layers of students. Use all layers of teacher by default
-parser.add_argument('--kd-T', type=float, default=4.0)  # Temperature for KL distillation
-parser.add_argument('--alpha', type=float, default=0.9)
-parser.add_argument('--beta', type=float, default=50.0)  # For custom-method distillation
-parser.add_argument('--t-load-model-path', type=str, default='None')
-parser.add_argument('--s-load-model-path', type=str, default='None')
+parser.add_argument('--kd-t', type=float, default=4.0)  # Temperature for KL distillation
+parser.add_argument('--alpha', type=float, default=0.9)  # For KL-divergence distillation
+parser.add_argument('--betas', nargs='+', type=float, default=[50.0])  # For custom-method distillation
+parser.add_argument('--t-path', type=str, default='None')  # The .pt file path of teacher model
+parser.add_argument('--s-path', type=str, default='None')  # The .pt file path of student model
 args = parser.parse_args()
 
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'  # For Mac OS
 args.save_dir = f'saves/{int(time.time())}'
 args.log_dir = f'{args.save_dir}/log'
 args.log_path = f'saves/logs.txt'
-if args.t_load_model_path is 'None':
-    args.t_load_model_path = args.s_load_model_path
+if args.t_path is 'None':
+    args.t_path = args.s_path
 
 
 class PMSPModelTrainer(Trainer):
@@ -81,7 +82,7 @@ class PMSPModelTrainer(Trainer):
         self.do_dist = self.args.distill is not 'None'
         self.do_soft_prune = self.args.soft_prune
         self.criterion_cls = nn.CrossEntropyLoss()
-        self.criterion_div = KLDistiller(self.args.kd_T)
+        self.criterion_div = KLDistiller(self.args.kd_t)
         if self.do_dist:
             self.criterion_kd, self.is_group, self.is_block = self._init_kd(self.args.distill)
 
@@ -112,30 +113,42 @@ class PMSPModelTrainer(Trainer):
         is_block = False
         if method == 'msp':
             is_block = True
-            criterion = MultiSimilarity()
-        elif method == 'sp':
-            is_group = True
-            criterion = Similarity()
+            criterion = [MultiSimilarity()]
         elif method == 'mat':
             is_block = True
-            criterion = MultiAttention(window_size=self.args.window_size)
+            criterion = [MultiAttention(window_size=self.args.mat_ws)]
+        elif method == 'msp_mat':
+            is_block = True
+            criterion = [MultiSimilarity(), MultiAttention(window_size=self.args.mat_ws)]
+        elif method == 'sp':
+            is_group = True
+            criterion = [Similarity()]
         elif method == 'at':
             is_group = True
-            criterion = Attention()
+            criterion = [Attention()]
         else:
             raise NotImplementedError(method)
         return criterion, is_group, is_block
 
     def _get_dist_feat(self, method, s_feat, t_feat):
         if method == 'msp':
-            s_f = s_feat
-            t_f = t_feat[-3:]
+            n = self.args.msp_ts
+            s_f = [s_feat]
+            t_f = [t_feat[-n:]]
         elif method == 'mat':
-            s_f = s_feat[1:-1]
-            t_f = t_feat[1:-1]
+            s_f = [s_feat[1:-1]]
+            t_f = [t_feat[1:-1]]
+        elif method == 'msp_mat':
+            n = self.args.msp_ts
+            msp_s_f = s_feat
+            msp_t_f = t_feat[-n:]
+            mat_s_f = s_feat[1:-1]
+            mat_t_f = t_feat[1:-1]
+            s_f = [msp_s_f, mat_s_f]
+            t_f = [msp_t_f, mat_t_f]
         elif method == 'at':
-            s_f = s_feat[1:-1]  # Get features g1 ~ g3
-            t_f = s_feat[1:-1]  # Get features g1 ~ g3
+            s_f = [s_feat[1:-1]]  # Get features g1 ~ g3
+            t_f = [s_feat[1:-1]]  # Get features g1 ~ g3
         elif method == 'sp':
             s_f = [s_feat[-2]]  # Get g3 only
             t_f = [s_feat[-2]]  # Get g3 only
@@ -156,13 +169,14 @@ class PMSPModelTrainer(Trainer):
         # Get the total_loss and backward
         if self.do_dist:
             # Do different kinds of distillation according to "args.distill"
+            betas = self.args.betas
             s_feat, s_logit = self.s_model(input, is_group_feat=self.is_group, is_block_feat=self.is_block)
             t_feat, t_logit = self.t_model(input, is_group_feat=self.is_group, is_block_feat=self.is_block)
             s_f, t_f = self._get_dist_feat(self.args.distill, s_feat, t_feat)
             loss_cls = self.criterion_cls(s_logit, target)
             loss_div = self.criterion_div(s_logit, t_logit)
-            loss_kd = self.criterion_kd(s_f, t_f)
-            loss = loss_cls + loss_div * self.args.alpha + loss_kd * self.args.beta
+            loss_kd = torch.stack([self.criterion_kd[i](s_f[i], t_f[i]) * betas[i] for i in range(len(s_f))]).sum()
+            loss = loss_cls + loss_div * self.args.alpha + loss_kd
         else:
             # Normal training
             s_logit = self.s_model(input)
@@ -210,8 +224,8 @@ def main():
     train_loader, eval_loader, num_classes = dataset.__dict__[args.dataset](args.batch_size)
     t_model = models.__dict__[args.model](num_classes=num_classes)
     s_model = models.__dict__[args.model](num_classes=num_classes)
-    load_model(t_model, args.t_load_model_path, logger, device)
-    load_model(s_model, args.s_load_model_path, logger, device)
+    load_model(t_model, args.t_path, logger, device)
+    load_model(s_model, args.s_path, logger, device)
     optimizer = optim.SGD(
         s_model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay, nesterov=True
     )
