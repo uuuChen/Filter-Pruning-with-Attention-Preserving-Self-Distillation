@@ -18,6 +18,7 @@ from helpers.trainer import Trainer
 from helpers.pruner import FiltersPruner
 from distillers_zoo import (
     MultiSimilarity,
+    LogitSimilarity,
     KLDistiller,
     Similarity,
     Attention,
@@ -53,6 +54,7 @@ parser.add_argument('--evaluate', action='store_true', default=False)
 parser.add_argument('--prune-interval', type=int, default=sys.maxsize)  # Do pruning process once by default
 parser.add_argument('--distill', type=str, default='None')  # Which distillation methods to use
 parser.add_argument('--msp-ts', type=int, default=3)  # Number of sampled teacher layers for "MSP" distillation
+parser.add_argument('--lsp-ts', type=int, default=3)  # Number of sampled teacher layers for "LSP" distillation
 parser.add_argument('--mat-ws', type=int, default=None)  # Window size for "MAT" distillation. Determine how
 # many layers of teacher are going to distill to all layers of students. Use all layers of teacher by default
 parser.add_argument('--kd-t', type=float, default=4.0)  # Temperature for KL distillation
@@ -114,6 +116,9 @@ class PMSPModelTrainer(Trainer):
         if method == 'msp':
             is_block = True
             criterion = [MultiSimilarity()]
+        elif method == 'lsp':
+            is_block = True
+            criterion = [LogitSimilarity()]
         elif method == 'mat':
             is_block = True
             criterion = [MultiAttention(window_size=self.args.mat_ws)]
@@ -130,7 +135,7 @@ class PMSPModelTrainer(Trainer):
             raise NotImplementedError(method)
         return criterion, is_group, is_block
 
-    def _get_dist_feat(self, method, s_feat, t_feat):
+    def _get_dist_feat(self, method, s_feat, t_feat, t_logit):
         if method == 'msp':
             n = self.args.msp_ts
             s_f = [s_feat]
@@ -138,6 +143,10 @@ class PMSPModelTrainer(Trainer):
         elif method == 'mat':
             s_f = [s_feat[1:-1]]
             t_f = [t_feat[1:-1]]
+        elif method == 'lsp':
+            n = self.args.lsp_ts
+            s_f = [s_feat]
+            t_f = [(t_feat[-n+1:], t_logit)]
         elif method == 'msp_mat':
             n = self.args.msp_ts
             msp_s_f = s_feat
@@ -172,7 +181,7 @@ class PMSPModelTrainer(Trainer):
             betas = self.args.betas
             s_feat, s_logit = self.s_model(input, is_group_feat=self.is_group, is_block_feat=self.is_block)
             t_feat, t_logit = self.t_model(input, is_group_feat=self.is_group, is_block_feat=self.is_block)
-            s_f, t_f = self._get_dist_feat(self.args.distill, s_feat, t_feat)
+            s_f, t_f = self._get_dist_feat(self.args.distill, s_feat, t_feat, t_logit)
             loss_cls = self.criterion_cls(s_logit, target)
             loss_div = self.criterion_div(s_logit, t_logit)
             loss_kd = torch.stack([self.criterion_kd[i](s_f[i], t_f[i]) * betas[i] for i in range(len(s_f))]).sum()
