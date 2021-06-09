@@ -8,24 +8,30 @@ class LogitSimilarity(nn.Module):
     def __init__(self):
         super().__init__()
 
-    def forward(self, s_g, t_g_l):
+    def forward(self, s_g_l, t_g_l):
         # --------------------------------------------
-        # Shape of s_g   : (s_nl,), (bs, s_ch, s_h, s_w)
-        # Shape of t_g_l : ((t_nl-1,), (bs, t_ch, t_h, t_w)), (1,)
+        # Shape of s_g_l : ((s_nl,), (bs, s_ch, s_h, s_w))   , (1,)
+        # Shape of t_g_l : ((t_nl-1,), (bs, t_ch, t_h, t_w)) , (1,)
         # --------------------------------------------
+        s_g, s_l = s_g_l  # Group of student's features, student's logit
         t_g, t_l = t_g_l  # Group of teacher's features, teacher's logit
 
         s_nl = len(s_g)
         t_nl = len(t_g) + 1
 
-        s_mtx = torch.stack([self.get_sim_matrix(s_f) for s_f in s_g])  # (s_nl, bs, bs)
-        t_mtx = torch.stack([self.get_sim_matrix(t_f) for t_f in t_g] + [self.get_sim_matrix(t_l, is_at=False)])  # (
-        # t_nl, bs, bs)
+        s_l_mtx = self.get_sim_matrix(s_l, is_at=False)  # (bs, bs)
+        t_l_mtx = self.get_sim_matrix(t_l, is_at=False)  # (bs, bs)
 
-        s_mtx = torch.unsqueeze(s_mtx, dim=1).repeat(1, t_nl, 1, 1)  # (s_nl, t_nl, bs, bs)
-        t_mtx = torch.unsqueeze(t_mtx, dim=0).repeat(s_nl, 1, 1, 1)  # (s_nl, t_nl, bs, bs)
+        s_g_mtx = torch.stack([self.get_sim_matrix(s_f) for s_f in s_g])  # (s_nl, bs, bs)
+        t_g_mtx = torch.stack([self.get_sim_matrix(t_f) for t_f in t_g] + [t_l_mtx])  # (t_nl, bs, bs)
 
-        loss = (s_mtx - t_mtx).pow(2).view(s_nl, -1).mean(1).mean()  # (1,)
+        s_g_mtx = torch.unsqueeze(s_g_mtx, dim=1).repeat(1, t_nl, 1, 1)  # (s_nl, t_nl, bs, bs)
+        t_g_mtx = torch.unsqueeze(t_g_mtx, dim=0).repeat(s_nl, 1, 1, 1)  # (s_nl, t_nl, bs, bs)
+
+        l_loss = (s_l_mtx - t_l_mtx).pow(2).mean()  # (1,)
+        g_loss = (s_g_mtx - t_g_mtx).pow(2).view(s_nl, -1).mean(1).mean()  # (1,)
+
+        loss = (l_loss + g_loss) / 2
         return loss
 
     def get_sim_matrix(self, f, is_at=True):

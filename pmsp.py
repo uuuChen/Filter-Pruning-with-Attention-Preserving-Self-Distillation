@@ -135,7 +135,7 @@ class PMSPModelTrainer(Trainer):
             raise NotImplementedError(method)
         return criterion, is_group, is_block
 
-    def _get_dist_feat(self, method, s_feat, t_feat, t_logit):
+    def _get_dist_feat(self, method, s_feat, t_feat, s_logit, t_logit):
         if method == 'msp':
             n = self.args.msp_ts
             s_f = [s_feat]
@@ -145,7 +145,7 @@ class PMSPModelTrainer(Trainer):
             t_f = [t_feat[1:-1]]
         elif method == 'lsp':
             n = self.args.lsp_ts
-            s_f = [s_feat]
+            s_f = [(s_feat, s_logit)]
             t_f = [(t_feat[-n+1:], t_logit)]
         elif method == 'msp_mat':
             n = self.args.msp_ts
@@ -181,7 +181,7 @@ class PMSPModelTrainer(Trainer):
             betas = self.args.betas
             s_feat, s_logit = self.s_model(input, is_group_feat=self.is_group, is_block_feat=self.is_block)
             t_feat, t_logit = self.t_model(input, is_group_feat=self.is_group, is_block_feat=self.is_block)
-            s_f, t_f = self._get_dist_feat(self.args.distill, s_feat, t_feat, t_logit)
+            s_f, t_f = self._get_dist_feat(self.args.distill, s_feat, t_feat, s_logit, t_logit)
             loss_cls = self.criterion_cls(s_logit, target)
             loss_div = self.criterion_div(s_logit, t_logit)
             loss_kd = torch.stack([self.criterion_kd[i](s_f[i], t_f[i]) * betas[i] for i in range(len(s_f))]).sum()
