@@ -29,9 +29,9 @@ class LogitSimilarity(nn.Module):
         t_g_mtx = torch.unsqueeze(t_g_mtx, dim=0).repeat(s_nl, 1, 1, 1)  # (s_nl, t_nl, bs, bs)
 
         l_loss = (s_l_mtx - t_l_mtx).pow(2).mean()  # (1,)
-        g_loss = (s_g_mtx - t_g_mtx).pow(2).view(s_nl, -1).mean(1).mean()  # (1,)
+        g_loss = (s_g_mtx - t_g_mtx).pow(2).view(s_nl, -1).mean(1).sum()  # (1,)
 
-        loss = (l_loss + g_loss) / 2
+        loss = (l_loss + g_loss) / (s_nl + 1)
         return loss
 
     def get_sim_matrix(self, f, is_at=True):
@@ -41,10 +41,10 @@ class LogitSimilarity(nn.Module):
         if is_at:
             f = self.at(f)
         f = f.view(f.shape[0], -1)  # (bs, ch * h * w) or (bs, h * w)
-        # f = F.normalize(f, dim=1)  # (bs, ch * h * w)
+        f = F.normalize(f, dim=1)  # (bs, ch * h * w)
         mtx = torch.matmul(f, torch.t(f))  # (bs, bs)
-        n_mtx = F.normalize(mtx, dim=1)  # (bs, bs)
-        return n_mtx
+        mtx = F.normalize(mtx, dim=1)  # (bs, bs)
+        return mtx
 
     def at(self, f):
         # --------------------------------------------

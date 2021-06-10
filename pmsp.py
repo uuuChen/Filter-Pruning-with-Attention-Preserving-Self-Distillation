@@ -62,12 +62,14 @@ parser.add_argument('--alpha', type=float, default=0.9)  # For KL-divergence dis
 parser.add_argument('--betas', nargs='+', type=float, default=[50.0])  # For custom-method distillation
 parser.add_argument('--t-path', type=str, default='None')  # The .pt file path of teacher model
 parser.add_argument('--s-path', type=str, default='None')  # The .pt file path of student model
+parser.add_argument('--log-name', type=str, default='logs.txt')  # The name of the log file
+parser.add_argument('--dev-idx', type=int, default=0)  # The index of the used cuda device
 args = parser.parse_args()
 
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'  # For Mac OS
 args.save_dir = f'saves/{int(time.time())}'
 args.log_dir = f'{args.save_dir}/log'
-args.log_path = f'saves/logs.txt'
+args.log_path = f'saves/{args.log_name}'
 if args.t_path is 'None':
     args.t_path = args.s_path
 
@@ -138,15 +140,15 @@ class PMSPModelTrainer(Trainer):
     def _get_dist_feat(self, method, s_feat, t_feat, s_logit, t_logit):
         if method == 'msp':
             n = self.args.msp_ts
-            s_f = [s_feat]
-            t_f = [t_feat[-n:]]
+            s_f = [s_feat[1:-1]]
+            t_f = [t_feat[-n-1:-1]]
         elif method == 'mat':
             s_f = [s_feat[1:-1]]
             t_f = [t_feat[1:-1]]
         elif method == 'lsp':
             n = self.args.lsp_ts
-            s_f = [(s_feat, s_logit)]
-            t_f = [(t_feat[-n+1:], t_logit)]
+            s_f = [(s_feat[1:-1], s_logit)]
+            t_f = [(t_feat[-n:-1], t_logit)]
         elif method == 'msp_mat':
             n = self.args.msp_ts
             msp_s_f = s_feat
@@ -225,7 +227,7 @@ def main():
     set_seeds(args.seed)
     check_dirs_exist([args.save_dir])
     logger = Logger(args.log_path)
-    device = get_device()
+    device = get_device(args.dev_idx)
     if args.dataset not in dataset.__dict__:
         raise NameError
     if args.model not in models.__dict__:
