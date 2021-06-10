@@ -216,10 +216,10 @@ class PMSPModelTrainer(Trainer):
         return loss, top1, top5
 
     def _evaluate(self, batch):
-        input_var, target_var = batch
-        output_var = self.s_model(input_var)
-        loss = self.criterion_cls(output_var, target_var)
-        top1, top5 = accuracy(output_var, target_var, topk=(1, 5))
+        input, target = batch
+        logit = self.s_model(input)
+        loss = self.criterion_cls(logit, target)
+        top1, top5 = accuracy(logit, target, topk=(1, 5))
         return {'loss': loss, 'top1': top1, 'top5': top5}
 
 
