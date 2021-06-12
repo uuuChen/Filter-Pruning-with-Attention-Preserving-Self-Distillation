@@ -13,7 +13,8 @@ class Similarity(nn.Module):
         # Shape of s_g : (s_nl,), (bs, s_ch, s_h, s_w)
         # Shape of t_g : (t_nl,), (bs, t_ch, t_h, t_w)
         # --------------------------------------------
-        return torch.sum(torch.stack([self.similarity_loss(s_f, t_f) for s_f, t_f in zip(s_g, t_g)]))  # (1,)
+        loss = sum([self.similarity_loss(s_f, t_f) for s_f, t_f in zip(s_g, t_g)])  # (1,)
+        return loss
 
     def similarity_loss(self, s_f, t_f):
         # --------------------------------------------

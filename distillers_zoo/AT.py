@@ -18,7 +18,7 @@ class Attention(nn.Module):
         # Shape of s_g (group) : (nl,), (bs, s_ch, s_h, s_h)
         # Shape of t_g (group) : (nl,), (bs, t_ch, t_h, t_h)
         # --------------------------------------------
-        loss = torch.sum(torch.stack([self.at_loss(s_f, t_f) for s_f, t_f in zip(s_g, t_g)]))  # (1,)
+        loss = sum([self.at_loss(s_f, t_f) for s_f, t_f in zip(s_g, t_g)])  # (1,)
         return loss
 
     def at_loss(self, s_f, t_f):

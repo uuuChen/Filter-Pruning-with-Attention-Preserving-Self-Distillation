@@ -47,11 +47,18 @@ class FiltersPruner(object):
         #    -a  : Use activation-base
         #    -gm : Use geometric-median-base
         # ------------------------------------
-        def get_gm_dists(arr):
-            return np.array([np.sum(np.power(ele - arr, 2)) for ele in arr])
 
-        def get_l1_scores(arr2d):
-            return np.sum(np.abs(arr2d), axis=1)
+        def get_gm_dists(arr):
+            # --------------------------------------------
+            # Shape of arr : (n_f, n_c * h * w)
+            # --------------------------------------------
+            return np.array([np.sum(np.power(ele - arr, 2)) for ele in arr])  # (n_f,)
+
+        def get_l1_scores(arr):
+            # --------------------------------------------
+            # Shape of arr: (n_f, n_c * h * w)
+            # --------------------------------------------
+            return np.sum(np.abs(arr), axis=1)  # (n_f,)
 
         if 'filter-a' in mode:
             f_scores = get_l1_scores(f_w)
@@ -167,6 +174,10 @@ class FiltersPruner(object):
             p.grad.data = grad
 
     def _prune_filters_and_channels(self, prune_rates, mode='filter-norm'):
+        """
+        # We imitate FPGM (CVPR - 2019 oral) and don’t have prune channels
+        # Github: https://github.com/he-y/filter-pruning-geometric-median/blob/master/pruning_cifar10.py
+        """
         i = 0
         dim = 0
         prune_indices = prune_indices_ = None
@@ -202,10 +213,10 @@ class FiltersPruner(object):
         # If the filter of the previous layer is prune, the channel corresponding to this layer must also be
         # prune
         # ----------------------------------------------------------
-        # Suppose Conv Shape: (n_k, n_c, h, w)
+        # Suppose Conv Shape: (n_f, n_c, h, w)
         #
         # Then:
-        #   prune_rate = ((n_k * act_prune_rate) * (n_c - n_prune_f) * n_k * kw) / (n_k * n_c * h * w)
+        #   prune_rate = ((n_f * act_prune_rate) * (n_c - n_prune_f) * n_f * kw) / (n_f * n_c * h * w)
         #
         $ Then:
         #   act_prune_rate = prune_rate * (n_c / (n_c - n_prune_f))
@@ -218,18 +229,18 @@ class FiltersPruner(object):
         act_prune_rates = list()
         for name, module in self.model.named_modules():
             if isinstance(module, torch.nn.Conv2d):
-                n_k, n_c = module.weight.shape[0:2]
+                n_f, n_c = module.weight.shape[0:2]
                 if i == 0:
                     act_prune_rate = prune_rates[i]
                 else:
                     act_prune_rate = prune_rates[i] * (n_c / (n_c - n_prune_f))
                 act_prune_rate = np.clip(act_prune_rate, 0.0, 1.0)
-                n_prune_f = round(n_k * (1.0 - act_prune_rate))
-                bias = abs(n_prune_f / n_k - act_prune_rate)
+                n_prune_f = round(n_f * (1.0 - act_prune_rate))
+                bias = abs(n_prune_f / n_f - act_prune_rate)
                 act_prune_rates.append(act_prune_rate)
                 i += 1
                 if verbose:
-                    print(f'{name:6} | original filter nums: {n_k:4} | prune filter nums: '
+                    print(f'{name:6} | original filter nums: {n_f:4} | prune filter nums: '
                           f'{n_prune_f:4} | actual filter prune rate : {act_prune_rate * 100.:.2f}% | '
                           f' bias: {bias * 100.:.2f}%')
         return act_prune_rates

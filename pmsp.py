@@ -138,6 +138,7 @@ class PMSPModelTrainer(Trainer):
         return criterion, is_group, is_block
 
     def _get_dist_feat(self, method, s_feat, t_feat, s_logit, t_logit):
+        t_feat = [f.detach() for f in t_feat]
         if method == 'msp':
             n = self.args.msp_ts
             s_f = [s_feat[1:-1]]
@@ -159,10 +160,10 @@ class PMSPModelTrainer(Trainer):
             t_f = [msp_t_f, mat_t_f]
         elif method == 'at':
             s_f = [s_feat[1:-1]]  # Get features g1 ~ g3
-            t_f = [s_feat[1:-1]]  # Get features g1 ~ g3
+            t_f = [t_feat[1:-1]]  # Get features g1 ~ g3
         elif method == 'sp':
-            s_f = [s_feat[-2]]  # Get g3 only
-            t_f = [s_feat[-2]]  # Get g3 only
+            s_f = [[s_feat[-2]]]  # Get g3 only
+            t_f = [[t_feat[-2]]]  # Get g3 only
         else:
             raise NotImplementedError(method)
         return s_f, t_f
