@@ -29,7 +29,7 @@ def print_nonzeros(model):
           f'{total / nonzero:10.2f}x  ({100 * (total - nonzero) / total:6.2f}% pruned)')
 
 
-def get_device(i):
+def get_device(i=0):
     """ Get device (CPU or GPU) """
     device = torch.device(f"cuda:{i}" if torch.cuda.is_available() else "cpu")
     n_gpu = torch.cuda.device_count()

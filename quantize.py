@@ -24,19 +24,19 @@ import torch.nn as nn
 
 parser = argparse.ArgumentParser(description="Quantize Process")
 parser.add_argument('--n-epochs', default=20, type=int)
-parser.add_argument('--batch-size', type=int, default=256)
+parser.add_argument('--batch-size', type=int, default=128)
 parser.add_argument('--lr', type=float, default=0.001)
 parser.add_argument('--seed', type=int, default=111)
-parser.add_argument('--model', type=str, default='alexnet')
-parser.add_argument('--dataset', type=str, default='cifar100')
+parser.add_argument('--model', type=str, default='resnet56')
+parser.add_argument('--dataset', type=str, default='cifar10')
 parser.add_argument('--load-model-path', type=str, default='None')
-parser.add_argument('--quan-mode', type=str, default='None')  # pattern: "(all|conv|fc)-quan"
+parser.add_argument('--quan-mode', type=str, default='all-quan')  # pattern: "(all|conv|fc)-quan"
 parser.add_argument('--quan-bits', type=int, default='None')
 parser.add_argument('--schedule', type=int, nargs='+', default=[50, 100, 150])
 parser.add_argument('--lr-drops', type=float, nargs='+', default=[0.1, 0.1, 0.1])
-
 parser.add_argument('--momentum', default=0.9, type=float)
 parser.add_argument('--weight-decay', default=5e-4, type=float)
+parser.add_argument('--dev-idx', type=int, default=0)  # The index of the used cuda device
 args = parser.parse_args()
 
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'  # For Mac OS
@@ -55,7 +55,7 @@ class QuantizedModelTrainer(Trainer):
         quantizer.quantize(self.model, self.args.quan_bits)
         self.quan_dict = quantizer.get_quan_dict()
 
-    def _set_quantized_weight_grad(self):
+    def _set_quan_weight_grad(self):
         for name, module in self.model.named_modules():
             if name in self.quan_dict:
                 weight = module.weight.data.cpu().numpy()
@@ -74,12 +74,12 @@ class QuantizedModelTrainer(Trainer):
                 module.weight.grad.data = torch.from_numpy(grad).to(self.device)
 
     def _get_loss_and_backward(self, batch):
-        input_var, target_var = batch
-        output_var = self.model(input_var)
-        loss = self.cross_entropy(output_var, target_var)
+        input, target = batch
+        logit = self.model(input)
+        loss = self.cross_entropy(logit, target)
         loss.backward()
-        self._set_quantized_weight_grad()
-        top1, top5 = accuracy(output_var, target_var, topk=(1, 5))
+        self._set_quan_weight_grad()
+        top1, top5 = accuracy(logit, target, topk=(1, 5))
         self.writer.add_scalars(
             'data/scalar_group', {
                 'total_loss': loss.item(),
@@ -91,10 +91,10 @@ class QuantizedModelTrainer(Trainer):
         return loss, top1, top5
 
     def _evaluate(self, batch):
-        input_var, target_var = batch
-        output_var = self.model(input_var)
-        loss = self.cross_entropy(output_var, target_var)
-        top1, top5 = accuracy(output_var, target_var, topk=(1, 5))
+        input, target = batch
+        logit = self.model(input)
+        loss = self.cross_entropy(logit, target)
+        top1, top5 = accuracy(logit, target, topk=(1, 5))
         return {'loss': loss, 'top1': top1, 'top5': top5}
 
 
@@ -102,7 +102,7 @@ def main():
     set_seeds(args.seed)
     check_dirs_exist([args.save_dir])
     logger = Logger(args.log_path)
-    device = get_device()
+    device = get_device(args.dev_idx)
     if args.dataset not in dataset.__dict__:
         raise NameError
     if args.model not in models.__dict__:

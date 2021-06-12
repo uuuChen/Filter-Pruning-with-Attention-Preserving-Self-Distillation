@@ -212,7 +212,7 @@ class PGADModelTrainer(Trainer):
         return loss
 
     def _get_loss_and_backward(self, batch):
-        input_var, target_var = batch
+        input, target = batch
 
         # Prune the weights per "args.prune_interval" if it's in the "prune mode"
         if self.do_prune:
@@ -223,16 +223,16 @@ class PGADModelTrainer(Trainer):
 
         # Do different kinds of distillation according to "dist_mode" if "do_dist", otherwise do general
         # training
-        s_output_var, s_features_dict = self.s_model_with_FE(input_var)
-        t_output_var, t_features_dict = self.t_model_with_FE(input_var)
+        s_logit, s_features_dict = self.s_model_with_FE(input)
+        t_logit, t_features_dict = self.t_model_with_FE(input)
         if self.do_dist:
             s_dist_features = self._trans_features_for_dist(s_features_dict)
             t_dist_features = self._trans_features_for_dist(t_features_dict)
-            pred_loss = self.cross_entropy(s_output_var, target_var)
+            pred_loss = self.cross_entropy(s_logit, target)
             GAD_loss = self._get_GAD_loss(s_dist_features[:-1], t_dist_features[:-1])
             KD_loss = self._get_KD_loss(s_dist_features[-1], t_dist_features[-1])
         else:
-            pred_loss = self.cross_entropy(s_output_var, target_var)
+            pred_loss = self.cross_entropy(s_logit, target)
             GAD_loss = KD_loss = torch.zeros(1, dtype=torch.float64).to(self.device)
         total_loss = pred_loss + GAD_loss * self.args.gad_factor + KD_loss * self.args.kd_factor
         total_loss.backward()
@@ -242,7 +242,7 @@ class PGADModelTrainer(Trainer):
             self._mask_pruned_weight_grad()
 
         # Get performance metrics
-        top1, top5 = accuracy(s_output_var, target_var, topk=(1, 5))
+        top1, top5 = accuracy(s_logit, target, topk=(1, 5))
         self.writer.add_scalars(
             'data/scalar_group', {
                 'total_loss': total_loss.item(),
@@ -256,10 +256,10 @@ class PGADModelTrainer(Trainer):
         return total_loss, top1, top5
 
     def _evaluate(self, batch):
-        input_var, target_var = batch
-        output_var = self.s_model(input_var)
-        loss = self.cross_entropy(output_var, target_var)
-        top1, top5 = accuracy(output_var, target_var, topk=(1, 5))
+        input, target = batch
+        logit = self.s_model(input)
+        loss = self.cross_entropy(logit, target)
+        top1, top5 = accuracy(logit, target, topk=(1, 5))
         return {'loss': loss, 'top1': top1, 'top5': top5}
 
 

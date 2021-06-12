@@ -134,7 +134,7 @@ class PWADModelTrainer(Trainer):
             shapes.append(w.shape)
         return weights, shapes
 
-    def _mask_pruned_weight_grad(self):
+    def _mask_prune_weight_grad(self):
         conv_mask = self.s_pruner.get_conv_mask()
         for name, module in self.s_model.named_modules():
             if name in conv_mask:
@@ -144,7 +144,7 @@ class PWADModelTrainer(Trainer):
                 grad.data = torch.from_numpy(new_grad_arr).to(self.device)
 
     def _get_loss_and_backward(self, batch):
-        input_var, target_var = batch
+        input, target = batch
 
         # Prune the weights per "args.prune_interval" if it's in the "prune mode"
         if self.do_prune:
@@ -157,18 +157,18 @@ class PWADModelTrainer(Trainer):
         # 2. Forward and get the prediction loss
         # 3. Backward and pass the gradients to the distiller
         s_upd_w = self.w_distiller(self.s_w, self.t_w)
-        s_output_var = self.s_model(input_var)
-        pred_loss = self.cross_entropy(s_output_var, target_var)
-        pred_loss.backward(retain_graph=True)
+        s_logit = self.s_model(input)
+        loss_cls = self.cross_entropy(s_logit, target)
+        loss_cls.backward(retain_graph=True)
         for upd_w, ori_w in zip(s_upd_w, self.s_w):
             upd_w.backward(ori_w.grad, retain_graph=True)
 
         # Set the gradient of the pruned weights to 0 if it's in the "hard prune mode"
         if self.do_prune and not self.do_soft_prune:
-            self._mask_pruned_weight_grad()
+            self._mask_prune_weight_grad()
 
         # Get performance metrics
-        top1, top5 = accuracy(s_output_var, target_var, topk=(1, 5))
+        top1, top5 = accuracy(s_logit, target, topk=(1, 5))
         self.writer.add_scalars(
             'data/scalar_group', {
                 'lr': self.cur_lr,
@@ -176,13 +176,13 @@ class PWADModelTrainer(Trainer):
                 'top5': top5
             }, self.global_step
         )
-        return pred_loss, top1, top5
+        return loss_cls, top1, top5
 
     def _evaluate(self, batch):
-        input_var, target_var = batch
-        output_var = self.s_model(input_var)
-        loss = self.cross_entropy(output_var, target_var)
-        top1, top5 = accuracy(output_var, target_var, topk=(1, 5))
+        input, target = batch
+        logit = self.s_model(input)
+        loss = self.cross_entropy(logit, target)
+        top1, top5 = accuracy(logit, target, topk=(1, 5))
         return {'loss': loss, 'top1': top1, 'top5': top5}
 
 

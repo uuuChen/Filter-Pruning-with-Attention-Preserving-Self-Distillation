@@ -29,23 +29,23 @@ class PostQuantizer:
 
             quan_range = np.power(2, bits) if isinstance(bits, int) else np.pow(2, bits[name])
             print(f'{name:20} | {str(ori_shape):35} | => quantize to {quan_range} indices')
-            flat_left_w = ori_w[ori_w != 0].reshape(-1, 1)
-            space = np.linspace(np.min(flat_left_w), np.max(flat_left_w), num=quan_range).reshape(-1, 1)
+            left_w = ori_w[ori_w != 0].reshape(-1, 1)
+            space = np.linspace(np.min(left_w), np.max(left_w), num=quan_range).reshape(-1, 1)
             kmeans = KMeans(
                 n_clusters=len(space),
                 init=space,
                 n_init=1,
                 algorithm="full"
             )
-            kmeans.fit(flat_left_w)
+            kmeans.fit(left_w)
 
-            left_indices = np.where(ori_w != 0)
+            left_ind = np.where(ori_w != 0)
             quan_w = np.zeros(ori_w.shape)
-            quan_w[left_indices] = kmeans.cluster_centers_[kmeans.labels_].reshape(-1)
+            quan_w[left_ind] = kmeans.cluster_centers_[kmeans.labels_].reshape(-1)
             module.weight.data = torch.from_numpy(quan_w).float().to(self.device)
 
             quan_labels = np.zeros(ori_w.shape)
-            quan_labels[left_indices] = kmeans.labels_
+            quan_labels[left_ind] = kmeans.labels_
 
             self._set_quan_dict(name, quan_labels)
 
