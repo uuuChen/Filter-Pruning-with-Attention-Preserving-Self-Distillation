@@ -22,6 +22,7 @@ parser.add_argument('--model', type=str, default='alexnet')
 parser.add_argument('--dataset', type=str, default='cifar100')
 parser.add_argument('--batch-size', type=int, default=128)
 parser.add_argument('--load-model-path', type=str, default='None')
+parser.add_argument('--dev-idx', type=int, default=0)
 args = parser.parse_args()
 
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'  # For Mac OS
@@ -49,7 +50,7 @@ class Evaluator(Trainer):
 def main():
     check_dirs_exist([args.save_dir])
     logger = Logger(args.log_path)
-    device = get_device()
+    device = get_device(args.dev_idx)
     if args.dataset not in dataset.__dict__:
         raise NameError
     if args.model not in models.__dict__:

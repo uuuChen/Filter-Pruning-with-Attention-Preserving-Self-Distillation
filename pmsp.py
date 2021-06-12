@@ -187,7 +187,7 @@ class PMSPModelTrainer(Trainer):
             s_f, t_f = self._get_dist_feat(self.args.distill, s_feat, t_feat, s_logit, t_logit)
             loss_cls = self.criterion_cls(s_logit, target)
             loss_div = self.criterion_div(s_logit, t_logit)
-            loss_kd = torch.stack([self.criterion_kd[i](s_f[i], t_f[i]) * betas[i] for i in range(len(s_f))]).sum()
+            loss_kd = sum([self.criterion_kd[i](s_f[i], t_f[i]) * betas[i] for i in range(len(s_f))])
             loss = loss_cls + loss_div * self.args.alpha + loss_kd
         else:
             # Normal training

@@ -16,10 +16,10 @@ python3 pmsp.py --model resnet56 --dataset cifar10 --prune-rates 0.6 --prune-mod
 #python3 pmsp.py --model resnet56 --dataset cifar10 --prune-rates 0.6 --prune-mode filter-n-g-gm-1 --samp-batches 15 --s-path saves/resnet56_cifar10/initial_train/model_epochs_163.pt --distill sp --seed 8152 --betas 3000
 
 # GM
-#python3 pgad.py --model resnet56 --dataset cifar10 --prune-rates 0.6 --prune-mode filter-gm --s-path saves/resnet56_cifar10/initial_train/model_epochs_163.pt --seed 8152
+#python3 pmsp.py --model resnet56 --dataset cifar10 --prune-rates 0.6 --prune-mode filter-gm --s-path saves/resnet56_cifar10/initial_train/model_epochs_163.pt --seed 8152
 
 # n-g-GM
-#python3 pgad.py --model resnet56 --dataset cifar10 --prune-rates 0.6 --prune-mode filter-n-g-gm-1 --samp-batches 15 --s-path saves/resnet56_cifar10/initial_train/model_epochs_163.pt --seed 8152
+#python3 pmsp.py --model resnet56 --dataset cifar10 --prune-rates 0.6 --prune-mode filter-n-g-gm-1 --samp-batches 15 --s-path saves/resnet56_cifar10/initial_train/model_epochs_163.pt --seed 8152
 
 # MAT-MSP
 #python3 pmsp.py --model resnet56 --dataset cifar10 --prune-rates 0.6 --prune-mode filter-n-g-gm-1 --samp-batches 15 --s-path saves/resnet56_cifar10/initial_train/model_epochs_163.pt --distill msp_mat --seed 8152 --betas 500 1000 --mat-ws 3 --msp-ts 3

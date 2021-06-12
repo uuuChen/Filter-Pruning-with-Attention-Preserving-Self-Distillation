@@ -156,13 +156,15 @@ class FiltersPruner(object):
         self.use_grad = val
 
     def _set_batches_weight_grad(self):
+        device = 'cpu'
+        self.model = self.model.to(device)
         params = list(self.model.parameters())
         train_iter = iter(self.train_loader)
-        input, target = [t.to(self.device) for t in next(train_iter)]
+        input, target = [t.to(device) for t in next(train_iter)]
         for i, batch in enumerate(train_iter, start=1):
             if i == self.samp_batches:
                 break
-            inp, tar = [t.to(self.device) for t in batch]
+            inp, tar = [t.to(device) for t in batch]
             input = torch.cat((input, inp), dim=0)
             target = torch.cat((target, tar), dim=0)
         self.optimizer.zero_grad()
@@ -172,6 +174,7 @@ class FiltersPruner(object):
         grads = np.array([p.grad for p in params], dtype=object)
         for p, grad in zip(params, grads):
             p.grad.data = grad
+        self.model = self.model.to(self.device)
 
     def _prune_filters_and_channels(self, prune_rates, mode='filter-norm'):
         """
