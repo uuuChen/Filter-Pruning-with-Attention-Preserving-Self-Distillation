@@ -127,6 +127,9 @@ class PMSPModelTrainer(Trainer):
         elif method == 'msp_mat':
             is_block = True
             criterion = [MultiSimilarity(), MultiAttention(window_size=self.args.mat_ws)]
+        elif method == 'kd':
+            is_group = True
+            criterion = [KLDistiller(T=self.args.kd_t)]
         elif method == 'sp':
             is_group = True
             criterion = [Similarity()]
@@ -158,6 +161,9 @@ class PMSPModelTrainer(Trainer):
             mat_t_f = t_feat[1:-1]
             s_f = [msp_s_f, mat_s_f]
             t_f = [msp_t_f, mat_t_f]
+        elif method == 'kd':
+            s_f = [s_logit]
+            t_f = [t_logit]
         elif method == 'at':
             s_f = [s_feat[1:-1]]  # Get features g1 ~ g3
             t_f = [t_feat[1:-1]]  # Get features g1 ~ g3
