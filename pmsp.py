@@ -90,7 +90,7 @@ class PMSPModelTrainer(Trainer):
         if self.do_dist:
             self.criterion_kd, self.is_group, self.is_block = self._init_kd(self.args.distill)
 
-        self.s_model_pruner = FiltersPruner(
+        self.s_pruner = FiltersPruner(
             self.s_model,
             self.optimizer,
             self.train_loader,
@@ -106,7 +106,7 @@ class PMSPModelTrainer(Trainer):
         self.t_model = self.t_model.to(self.device)
 
     def _mask_prune_weight_grad(self):
-        conv_mask = self.s_model_pruner.get_conv_mask()
+        conv_mask = self.s_pruner.get_conv_mask()
         for name, module in self.s_model.named_modules():
             if name in conv_mask:
                 grad = module.weight.grad
@@ -180,7 +180,7 @@ class PMSPModelTrainer(Trainer):
         # Prune the weights per "args.prune_interval" if it's in the "prune mode"
         if self.do_prune:
             if self.last_epoch != self.cur_epoch and self.cur_epoch % self.args.prune_interval == 0:
-                self.s_model_pruner.prune(self.args.prune_mode, self.args.prune_rates)
+                self.s_pruner.prune(self.args.prune_mode, self.args.prune_rates)
                 self.last_epoch = self.cur_epoch
                 print_nonzeros(self.s_model)
 
