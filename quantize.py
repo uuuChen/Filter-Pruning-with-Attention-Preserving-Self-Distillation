@@ -1,6 +1,7 @@
 import argparse
 import os
 import time
+import numpy as np
 
 from helpers.utils import (
     check_dirs_exist,
@@ -62,28 +63,28 @@ class QuantizedModelTrainer(Trainer):
                 if name not in self.mask:
                     self.mask[name] = dict()
                 mask = self.mask[name]
-                weight = module.weight
-                grad = module.weight.grad
+                weight = module.weight.data.cpu().numpy()
+                grad = module.weight.grad.data.cpu().numpy()
 
                 # Mask gradients of pruend weights
                 key = 'grad'
                 if key not in mask:
-                    mask[key] = torch.where(weight == 0, 0, 1)
+                    mask[key] = np.where(weight == 0, 0, 1)
                 grad *= mask[key]
 
                 # Set gradients of quantized weights
                 quan_labels = self.quan_dict[name]
-                quan_range = len(torch.unique(quan_labels))
+                quan_range = len(np.unique(quan_labels))
                 key = 'ind'
                 if key not in mask:
                     mask[key] = dict()
                 for i in range(quan_range):
                     if i not in mask[key]:
-                        mask[key][i] = torch.where(quan_labels == i)
+                        mask[key][i] = np.where(quan_labels == i)
                     group_ind = mask[key][i]
-                    group_grad_sum = torch.sum(grad[group_ind])
+                    group_grad_sum = np.sum(grad[group_ind])
                     grad[group_ind] = group_grad_sum
-                module.weight.grad.data = grad
+                module.weight.grad.data = torch.from_numpy(grad).to(self.device)
 
     def _get_loss_and_backward(self, batch):
         input, target = batch

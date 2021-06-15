@@ -43,7 +43,7 @@ class PostQuantizer:
             quan_labels = np.zeros(ori_w.shape)
             quan_labels[left_ind] = kmeans.labels_
 
-            self.quan_dict[name] = torch.from_numpy(quan_labels).to(self.device)
+            self.quan_dict[name] = quan_labels
 
 
 
