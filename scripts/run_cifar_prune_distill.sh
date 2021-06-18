@@ -9,6 +9,9 @@ python3 pmsp.py --model resnet56 --dataset cifar10 --prune-rates 0.6 --prune-mod
 # LSP + KD
 python3 pmsp.py --model resnet56 --dataset cifar10 --prune-rates 0.6 --prune-mode filter-n-g-gm-1 --samp-batches 15 --s-path saves/resnet56_cifar10/initial_train/model_epochs_163.pt --distill lsp --seed 8152 --betas 500 --lsp-ts 4
 
+# LSP2 + KD
+python3 pmsp.py --model resnet56 --dataset cifar10 --prune-rates 0.6 --prune-mode filter-n-g-gm-1 --samp-batches 15 --s-path saves/resnet56_cifar10/initial_train/model_epochs_163.pt --distill lsp2 --seed 8152 --betas 30000 --lsp2-ws 4
+
 # AT + KD
 #python3 pmsp.py --model resnet56 --dataset cifar10 --prune-rates 0.6 --prune-mode filter-n-g-gm-1 --samp-batches 15 --s-path saves/resnet56_cifar10/initial_train/model_epochs_163.pt --distill at --seed 8152 --betas 1000
 

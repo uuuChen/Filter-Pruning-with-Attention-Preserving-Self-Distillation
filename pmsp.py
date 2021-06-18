@@ -17,8 +17,8 @@ import models
 from helpers.trainer import Trainer
 from helpers.pruner import FiltersPruner
 from distillers_zoo import (
-    MultiSimilarity,
     LogitSimilarity,
+    LogitSimilarity2,
     KLDistiller,
     Similarity,
     Attention,
@@ -55,6 +55,8 @@ parser.add_argument('--prune-interval', type=int, default=sys.maxsize)  # Do pru
 parser.add_argument('--distill', type=str, default='None')  # Which distillation methods to use
 parser.add_argument('--msp-ts', type=int, default=3)  # Number of sampled teacher layers for "MSP" distillation
 parser.add_argument('--lsp-ts', type=int, default=3)  # Number of sampled teacher layers for "LSP" distillation
+parser.add_argument('--lsp2-ws', type=int, default=None)  # Window size for "LSP2" distillation. Determine how
+# many layers of teacher are going to distill to all layers of students. Use all layers of teacher by default
 parser.add_argument('--mat-ws', type=int, default=None)  # Window size for "MAT" distillation. Determine how
 # many layers of teacher are going to distill to all layers of students. Use all layers of teacher by default
 parser.add_argument('--kd-t', type=float, default=4.0)  # Temperature for KL distillation
@@ -115,18 +117,15 @@ class PMSPModelTrainer(Trainer):
     def _init_kd(self, method):
         is_group = False
         is_block = False
-        if method == 'msp':
-            is_block = True
-            criterion = [MultiSimilarity()]
-        elif method == 'lsp':
+        if method == 'lsp':
             is_block = True
             criterion = [LogitSimilarity()]
+        elif method == 'lsp2':
+            is_block = True
+            criterion = [LogitSimilarity2(window_size=self.args.lsp2_ws)]
         elif method == 'mat':
             is_block = True
             criterion = [MultiAttention(window_size=self.args.mat_ws)]
-        elif method == 'msp_mat':
-            is_block = True
-            criterion = [MultiSimilarity(), MultiAttention(window_size=self.args.mat_ws)]
         elif method == 'kd':
             is_group = True
             criterion = [KLDistiller(T=self.args.kd_t)]
@@ -142,25 +141,16 @@ class PMSPModelTrainer(Trainer):
 
     def _get_dist_feat(self, method, s_feat, t_feat, s_logit, t_logit):
         t_feat = [f.detach() for f in t_feat]
-        if method == 'msp':
-            n = self.args.msp_ts
-            s_f = [s_feat[1:-1]]
-            t_f = [t_feat[-n-1:-1]]
-        elif method == 'mat':
-            s_f = [s_feat[1:-1]]
-            t_f = [t_feat[1:-1]]
-        elif method == 'lsp':
+        if method == 'lsp':
             n = self.args.lsp_ts
             s_f = [(s_feat[1:-1], s_logit)]
             t_f = [(t_feat[-n:-1], t_logit)]
-        elif method == 'msp_mat':
-            n = self.args.msp_ts
-            msp_s_f = s_feat
-            msp_t_f = t_feat[-n:]
-            mat_s_f = s_feat[1:-1]
-            mat_t_f = t_feat[1:-1]
-            s_f = [msp_s_f, mat_s_f]
-            t_f = [msp_t_f, mat_t_f]
+        elif method == 'lsp2':
+            s_f = [(s_feat[1:-1], s_logit)]
+            t_f = [(t_feat[1:-1], t_logit)]
+        elif method == 'mat':
+            s_f = [s_feat[1:-1]]
+            t_f = [t_feat[1:-1]]
         elif method == 'kd':
             s_f = [s_logit]
             t_f = [t_logit]
