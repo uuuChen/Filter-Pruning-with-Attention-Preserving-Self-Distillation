@@ -23,6 +23,7 @@ from distillers_zoo import (
     Similarity,
     Attention,
     MultiAttention,
+    MultiSimilarity,
 )
 
 from tensorboardX import SummaryWriter
@@ -126,6 +127,9 @@ class PMSPModelTrainer(Trainer):
         elif method == 'mat':
             is_block = True
             criterion = [MultiAttention(window_size=self.args.mat_ws)]
+        elif method == 'msp':
+            is_block = True
+            criterion = [MultiSimilarity()]
         elif method == 'kd':
             is_group = True
             criterion = [KLDistiller(T=self.args.kd_t)]
@@ -151,6 +155,10 @@ class PMSPModelTrainer(Trainer):
         elif method == 'mat':
             s_f = [s_feat[1:-1]]
             t_f = [t_feat[1:-1]]
+        elif method == 'msp':
+            n = self.args.msp_ts
+            s_f = [s_feat[1:-1]]
+            t_f = [t_feat[-n-1:-1]]
         elif method == 'kd':
             s_f = [s_logit]
             t_f = [t_logit]
