@@ -37,12 +37,13 @@ parser.add_argument('--lr-drops', type=float, nargs='+', default=[0.1, 0.1, 0.1]
 parser.add_argument('--momentum', default=0.9, type=float)
 parser.add_argument('--weight-decay', default=5e-4, type=float)
 parser.add_argument('--dev-idx', type=int, default=0)  # The index of the used cuda device
+parser.add_argument('--log-name', type=str, default='logs.txt')  # The name of the log file
 args = parser.parse_args()
 
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'  # For Mac OS
 args.save_dir = f'saves/{int(time.time())}'
 args.log_dir = f'{args.save_dir}/log'
-args.log_path = f'saves/logs.txt'
+args.log_path = f'saves/{args.log_name}'
 args.quan_model_path = f'{args.save_dir}/model_best.pt'
 
 
