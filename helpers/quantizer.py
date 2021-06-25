@@ -22,17 +22,15 @@ class PostQuantizer:
                     isinstance(module, nn.Linear) and not self.do_c_quan):
                 continue
             ori_w = module.weight.data.cpu().numpy()
+            n_uni_w = len(np.unique(ori_w))
+            quan_range = np.power(2, bits) if isinstance(bits, int) else np.power(2, bits[name])
+            if quan_range >= n_uni_w:
+                continue
 
-            quan_range = np.power(2, bits) if isinstance(bits, int) else np.pow(2, bits[name])
             print(f'{name:20} | {str(ori_w.shape):35} | => quantize to {quan_range} indices')
             left_w = ori_w[ori_w != 0].reshape(-1, 1)
             space = np.linspace(np.min(left_w), np.max(left_w), num=quan_range).reshape(-1, 1)
-            kmeans = KMeans(
-                n_clusters=len(space),
-                init=space,
-                n_init=1,
-                algorithm="full"
-            )
+            kmeans = KMeans(n_clusters=len(space), init=space, n_init=1, algorithm="full")
             kmeans.fit(left_w)
 
             left_ind = np.where(ori_w != 0)
