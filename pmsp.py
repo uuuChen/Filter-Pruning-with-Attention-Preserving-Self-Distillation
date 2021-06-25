@@ -8,6 +8,7 @@ from helpers.utils import (
     get_device,
     accuracy,
     load_model,
+    save_model,
     print_nonzeros,
     set_seeds,
     Logger
@@ -88,6 +89,7 @@ class PMSPModelTrainer(Trainer):
         self.do_prune = self.args.prune_mode is not 'None'
         self.do_dist = self.args.distill is not 'None'
         self.do_soft_prune = self.args.soft_prune
+        self.do_hard_prune = self.do_prune and not self.do_soft_prune
         self.criterion_cls = nn.CrossEntropyLoss()
         self.criterion_div = KLDistiller(self.args.kd_t)
         if self.do_dist:
@@ -175,13 +177,6 @@ class PMSPModelTrainer(Trainer):
     def _get_loss_and_backward(self, batch):
         input, target = batch
 
-        # Prune the weights per "args.prune_interval" if it's in the "prune mode"
-        if self.do_prune:
-            if self.last_epoch != self.cur_epoch and self.cur_epoch % self.args.prune_interval == 0:
-                self.s_pruner.prune(self.args.prune_mode, self.args.prune_rates)
-                self.last_epoch = self.cur_epoch
-                print_nonzeros(self.s_model)
-
         # Get the total_loss and backward
         if self.do_dist:
             # Do different kinds of distillation according to "args.distill"
@@ -202,7 +197,7 @@ class PMSPModelTrainer(Trainer):
         loss.backward()
 
         # Set the gradient of the pruned weights to 0 if it's in the "hard prune mode"
-        if self.do_prune and not self.do_soft_prune:
+        if self.do_hard_prune:
             self._mask_prune_weight_grad()
 
         # Get performance metrics
@@ -226,6 +221,30 @@ class PMSPModelTrainer(Trainer):
         loss = self.criterion_cls(logit, target)
         top1, top5 = accuracy(logit, target, topk=(1, 5))
         return {'loss': loss, 'top1': top1, 'top5': top5}
+
+    def _prune_s_model(self, do_prune):
+        if do_prune and self.cur_epoch % self.args.prune_interval == 0:
+            self.s_pruner.prune(self.args.prune_mode, self.args.prune_rates)
+            print_nonzeros(self.s_model)
+
+    def train(self):
+        """ It’s a little different from FPGM, they do hard-prune after training an epoch,
+            however, the experimental results are very close.
+            Code: https://github.com/he-y/filter-pruning-geometric-median/blob/master/pruning_cifar10.py """
+        self.model.train()  # Train mode
+        self.model = self.model.to(self.device)
+        best_top1 = 0.
+        self.cur_lr = self.args.lr
+        self.global_step = 0
+        for epoch in range(self.args.n_epochs):
+            self.cur_epoch = epoch
+            self._prune_s_model(self.do_hard_prune)
+            self._train_epoch()
+            self._prune_s_model(self.do_soft_prune)
+            eval_result = self._eval_epoch()
+            if best_top1 < eval_result['top1']:
+                best_top1 = eval_result['top1']
+                save_model(self.model, self._get_save_model_path(), self.logger)
 
 
 def main():
@@ -253,8 +272,6 @@ def main():
         trainer.eval()
     else:
         trainer.train()
-        if args.soft_prune:
-            s_model.prune(args.prune_mode, args.prune_rates)
         trainer.eval()
 
 
