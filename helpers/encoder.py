@@ -301,14 +301,6 @@ class HuffmanEncoder:
         def get_title_text():
             return (f"{'Layer':<35} | {'original bytes':>20} {'compressed bytes':>20} {'improvement':>11} "
                     f"{'percent':>7}")
-
-        def get_text_by_key(key):
-            nonlocal s, s2n
-            name = s2n[key]
-            orig = s[key][0]
-            comp = s[key][1]
-            return f"{name:35} | {orig:>20} {comp:>20} {orig / comp:>10.2f}x {100 * comp / orig:>6.2f}%"
-
         # Log title
         log_text = (
             f"{get_title_text()}\n" +
@@ -336,6 +328,13 @@ class HuffmanEncoder:
             s[key][1] += comp
             s['t'][0] += orig
             s['t'][1] += comp
+
+        def get_text_by_key(key):
+            nonlocal s, s2n
+            name = s2n[key]
+            orig = s[key][0]
+            comp = s[key][1]
+            return f"{name:35} | {orig:>20} {comp:>20} {orig / comp:>10.2f}x {100 * comp / orig:>6.2f}%"
 
         # Log results of the compression rate
         log_text = (

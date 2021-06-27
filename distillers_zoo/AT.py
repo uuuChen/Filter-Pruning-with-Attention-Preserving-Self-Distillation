@@ -1,14 +1,15 @@
 from __future__ import print_function
 
-import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 
 class Attention(nn.Module):
-    """Paying More Attention to Attention: Improving the Performance of Convolutional Neural Networks
+    """
+    Paying More Attention to Attention: Improving the Performance of Convolutional Neural Networks
     via Attention Transfer
-    code: https://github.com/szagoruyko/attention-transfer"""
+    code: https://github.com/szagoruyko/attention-transfer
+    """
     def __init__(self, p=2):
         super(Attention, self).__init__()
         self.p = p

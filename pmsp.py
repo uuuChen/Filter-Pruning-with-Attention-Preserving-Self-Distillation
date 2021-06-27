@@ -25,6 +25,7 @@ from distillers_zoo import (
     Attention,
     MultiAttention,
     MultiSimilarity,
+    MultiSimilarityPlotter,
 )
 
 from tensorboardX import SummaryWriter
@@ -223,14 +224,30 @@ class PMSPModelTrainer(Trainer):
         return {'loss': loss, 'top1': top1, 'top5': top5}
 
     def _prune_s_model(self, do_prune):
-        if do_prune and self.cur_epoch % self.args.prune_interval == 0:
-            self.s_pruner.prune(self.args.prune_mode, self.args.prune_rates)
-            print_nonzeros(self.s_model)
+        if not (do_prune and self.cur_epoch % self.args.prune_interval == 0):
+            return
+        self.s_pruner.prune(self.args.prune_mode, self.args.prune_rates)
+        print_nonzeros(self.s_model)
+
+    def _plot_feat(self, method):
+        if method == 'msp':
+            plotter = MultiSimilarityPlotter()
+        else:
+            return
+        for i, batch in enumerate(self.train_loader):
+            input, target = [t.to(self.device) for t in batch]
+            s_feat, _ = self.s_model(input, is_group_feat=self.is_group, is_block_feat=self.is_block)
+            t_feat, _ = self.t_model(input, is_group_feat=self.is_group, is_block_feat=self.is_block)
+            s_f, t_f = self._get_dist_feat(self.args.distill, s_feat, t_feat, None, None)
+            plotter.plot(s_f[0], t_f[0], input, target)
+            break
 
     def train(self):
-        """ It’s a little different from FPGM, they do hard-prune after training an epoch,
-            however, the experimental results are very close.
-            Code: https://github.com/he-y/filter-pruning-geometric-median/blob/master/pruning_cifar10.py """
+        """
+        It’s a little different from FPGM (CVPR - 2019 oral), they do hard-prune after training an epoch,
+        however, the experimental results are very close.
+        Github: https://github.com/he-y/filter-pruning-geometric-median/blob/master/pruning_cifar10.py
+        """
         self.model.train()  # Train mode
         self.model = self.model.to(self.device)
         best_top1 = 0.
@@ -241,6 +258,7 @@ class PMSPModelTrainer(Trainer):
             self._prune_s_model(self.do_hard_prune)
             self._train_epoch()
             self._prune_s_model(self.do_soft_prune)
+            # self._plot_feat(self.args.distill)
             eval_result = self._eval_epoch()
             if best_top1 < eval_result['top1']:
                 best_top1 = eval_result['top1']
