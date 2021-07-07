@@ -39,7 +39,8 @@ parser.add_argument('--n-epochs', type=int, default=200)
 parser.add_argument('--batch-size', type=int, default=128)
 parser.add_argument('--lr', type=float, default=0.01)
 parser.add_argument('--seed', type=int, default=111)
-parser.add_argument('--model', type=str, default='resnet56')
+parser.add_argument('--t-model', type=str, default=None)
+parser.add_argument('--s-model', type=str, default=None)
 parser.add_argument('--dataset', type=str, default='cifar100')
 parser.add_argument('--schedule', type=int, nargs='+', default=[60, 120, 160])
 parser.add_argument('--lr-drops', type=float, nargs='+', default=[0.2, 0.2, 0.2])
@@ -65,8 +66,8 @@ parser.add_argument('--mat-ws', type=int, default=None)  # Window size for "MAT"
 parser.add_argument('--kd-t', type=float, default=4.0)  # Temperature for KL distillation
 parser.add_argument('--alpha', type=float, default=0.9)  # For KL-divergence distillation
 parser.add_argument('--betas', nargs='+', type=float, default=[50.0])  # For custom-method distillation
-parser.add_argument('--t-path', type=str, default='None')  # The .pt file path of teacher model
-parser.add_argument('--s-path', type=str, default='None')  # The .pt file path of student model
+parser.add_argument('--t-path', type=str, default=None)  # The .pt file path of teacher model
+parser.add_argument('--s-path', type=str, default=None)  # The .pt file path of student model
 parser.add_argument('--log-name', type=str, default='logs.txt')  # The name of the log file
 parser.add_argument('--dev-idx', type=int, default=0)  # The index of the used cuda device
 args = parser.parse_args()
@@ -75,8 +76,9 @@ os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'  # For Mac OS
 args.save_dir = f'saves/{int(time.time())}'
 args.log_dir = f'{args.save_dir}/log'
 args.log_path = f'saves/{args.log_name}'
-if args.t_path is 'None':
-    args.t_path = args.s_path
+if args.s_model is None:  # Pruning + Self Distillation
+    args.s_model = args.t_model
+    args.s_path = args.t_path
 
 
 class PMSPModelTrainer(Trainer):
@@ -234,10 +236,10 @@ class PMSPModelTrainer(Trainer):
             plotter = MultiSimilarityPlotter()
         else:
             return
-        for i, batch in enumerate(self.train_loader):
+        for i, batch in enumerate(self.eval_loader):
             input, target = [t.to(self.device) for t in batch]
-            s_feat, _ = self.s_model(input, is_group_feat=self.is_group, is_block_feat=self.is_block)
-            t_feat, _ = self.t_model(input, is_group_feat=self.is_group, is_block_feat=self.is_block)
+            s_feat, _ = self.s_model(input, is_group_feat=True, is_block_feat=False)
+            t_feat, _ = self.t_model(input, is_group_feat=True, is_block_feat=False)
             s_f, t_f = self._get_dist_feat(self.args.distill, s_feat, t_feat, None, None)
             plotter.plot(s_f[0], t_f[0], input, target)
             break
@@ -272,11 +274,13 @@ def main():
     device = get_device(args.dev_idx)
     if args.dataset not in dataset.__dict__:
         raise NameError
-    if args.model not in models.__dict__:
+    if args.t_model not in models.__dict__:
+        raise NameError
+    if args.s_model not in models.__dict__:
         raise NameError
     train_loader, eval_loader, num_classes = dataset.__dict__[args.dataset](args.batch_size)
-    t_model = models.__dict__[args.model](num_classes=num_classes)
-    s_model = models.__dict__[args.model](num_classes=num_classes)
+    t_model = models.__dict__[args.t_model](num_classes=num_classes)
+    s_model = models.__dict__[args.s_model](num_classes=num_classes)
     load_model(t_model, args.t_path, logger, device)
     load_model(s_model, args.s_path, logger, device)
     optimizer = optim.SGD(

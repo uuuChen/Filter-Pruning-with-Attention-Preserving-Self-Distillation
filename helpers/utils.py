@@ -61,8 +61,8 @@ def accuracy(output, target, topk=(1,)):
 
 
 def load_model(model, file_path, logger, device='cuda'):
-    logger.log(f'Loading the model from {file_path}', verbose=True)
     if file_path is not None:
+        logger.log(f'Loading the model from {file_path}', verbose=True)
         model.load_state_dict(torch.load(file_path, map_location=device))
 
 

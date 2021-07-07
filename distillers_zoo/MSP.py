@@ -71,17 +71,24 @@ class MultiSimilarityPlotter(MultiSimilarity):
         s_sim_g = torch.stack([self.get_sim_matrix(s_f) for s_f in s_g])  # (s_nl, bs, bs)
         t_sim_g = torch.stack([self.get_sim_matrix(t_f) for t_f in t_g])  # (t_nl, bs, bs)
 
-        s_ind_g = torch.argsort(-s_sim_g, dim=2)  # (s_nl, bs, bs)
-        t_ind_g = torch.argsort(-t_sim_g, dim=2)  # (t_nl, bs, bs)
+        s_pos_ind_g = torch.argsort(-s_sim_g, dim=2)  # (s_nl, bs, bs)
+        t_pos_ind_g = torch.argsort(-t_sim_g, dim=2)  # (t_nl, bs, bs)
+        s_neg_ind_g = torch.argsort(s_sim_g, dim=2)  # (s_nl, bs, bs)
+        t_neg_ind_g = torch.argsort(t_sim_g, dim=2)  # (t_nl, bs, bs)
 
         pivot = 0
-        for i, (t_ind_f, t_attn_f) in enumerate(zip(t_ind_g, t_attn_g)):
-            ind = t_ind_f[pivot, :n_samp]  # (n_samp,)
-            r_imgs = input[ind]  # (n_samp, h, w, ch). Sampled raw images
-            t_imgs = t_attn_f[ind]  # (n_samp, t_h, t_w)
-            fig, axs = plt.subplots(2, n_samp)  # 2 rows and n_samp columns
+        for i, (t_pos_ind_f, t_neg_ind_f, t_attn_f) in enumerate(zip(t_pos_ind_g, t_neg_ind_g, t_attn_g)):
+            pos_ind = t_pos_ind_f[pivot, :n_samp]  # (n_samp,)
+            neg_ind = t_neg_ind_f[pivot, :n_samp]  # (n_samp,)
+            r_pos_imgs = input[pos_ind]  # (n_samp, h, w, ch). Sampled raw images
+            r_neg_imgs = input[neg_ind]  # (n_samp, h, w, ch). Sampled raw images
+            t_pos_attns = t_attn_f[pos_ind]  # (n_samp, t_h, t_w)
+            t_neg_attns = t_attn_f[neg_ind]  # (n_samp, t_h, t_w)
+            fig, axs = plt.subplots(4, n_samp)  # 4 rows and n_samp columns
             for j in range(n_samp):
-                axs[0, j].imshow(r_imgs[j], interpolation="bicubic")
-                axs[1, j].imshow(t_imgs[j],  cmap="jet")
+                axs[0, j].imshow(r_pos_imgs[j], interpolation="bicubic")
+                axs[1, j].imshow(t_pos_attns[j],  cmap="jet")
+                axs[2, j].imshow(r_neg_imgs[j], interpolation="bicubic")
+                axs[3, j].imshow(t_neg_attns[j],  cmap="jet")
         plt.show()
 
