@@ -245,8 +245,8 @@ class PMSPModelTrainer(Trainer):
             return
         for i, batch in enumerate(self.eval_loader):
             input, target = [t.to(self.device) for t in batch]
-            s_feat, _ = self.s_model(input, is_group_feat=True, is_block_feat=False)
-            t_feat, _ = self.t_model(input, is_group_feat=True, is_block_feat=False)
+            s_feat, _ = self.s_model(input, is_group_feat=False, is_block_feat=True)
+            t_feat, _ = self.t_model(input, is_group_feat=False, is_block_feat=True)
             s_f, t_f = self._get_dist_feat(self.args.distill, s_feat, t_feat, None, None)
             plotter.plot(s_f[0], t_f[0], input, target)
             break
@@ -265,9 +265,9 @@ class PMSPModelTrainer(Trainer):
         for epoch in range(self.args.n_epochs):
             self.cur_epoch = epoch
             self._prune_s_model(self.do_hard_prune)
-            self._train_epoch()
+            # self._train_epoch()
             self._prune_s_model(self.do_soft_prune)
-            # self._plot_feat(self.args.distill)
+            self._plot_feat(self.args.distill)
             eval_result = self._eval_epoch()
             if best_top1 < eval_result['top1']:
                 best_top1 = eval_result['top1']

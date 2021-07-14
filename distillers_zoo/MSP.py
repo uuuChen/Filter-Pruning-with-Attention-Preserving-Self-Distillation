@@ -43,9 +43,9 @@ class MultiSimilarity(nn.Module):
         # --------------------------------------------
         # Shape of f : (bs, ch, h, w)
         # --------------------------------------------
-        out = F.normalize(f.pow(2).mean(1))  # (bs, h, w)
+        out = f.pow(2).mean(1)  # (bs, h, w)
         if is_flat:
-            out = out.view(f.size(0), -1)  # (bs, h * w)
+            out =F.normalize(out.view(f.size(0), -1))  # (bs, h * w)
         return out
 
 
