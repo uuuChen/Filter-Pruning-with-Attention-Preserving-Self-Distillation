@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+# ASP
+python3 pmsp.py --t-model resnet56 --s-model resnet20 --dataset cifar100 --t-path saves/1625594199/model_best.pt --distill asp --seed 8152 --alpha 0.0 --betas 3000 --dev-idx 0 --log-name ASP.txt --lr 0.05 --n-epochs 240 --batch-size 64 --schedule 150 180 210 --lr-drops 0.1 0.1 0.1
+
 # MSP + KD
 python3 pmsp.py --t-model resnet56 --dataset cifar10 --prune-rates 0.6 --prune-mode filter-n-g-gm-1 --samp-batches 15 --t-path saves/resnet56_cifar10/initial_train/model_epochs_163.pt --distill msp --seed 8152 --betas 500 --msp-ts 3
 
@@ -10,7 +13,7 @@ python3 pmsp.py --t-model resnet56 --dataset cifar10 --prune-rates 0.6 --prune-m
 python3 pmsp.py --t-model resnet56 --dataset cifar10 --prune-rates 0.6 --prune-mode filter-n-g-gm-1 --samp-batches 15 --t-path saves/resnet56_cifar10/initial_train/model_epochs_163.pt --distill lsp --seed 8152 --betas 300 --lsp-ts 4
 
 # LSP2 + KD
-python3 pmsp.py --t-model resnet56 --dataset cifar10 --prune-rates 0.6 --prune-mode filter-n-g-gm-1 --samp-batches 15 --t-path saves/resnet56_cifar10/initial_train/model_epochs_163.pt --distill lsp2 --seed 8152 --betas 30000 --lsp2-ws 4
+python3 pmsp.py --t-model resnet56 --dataset cifar10 --prune-rates 0.6 --prune-mode filter-n-g-gm-1 --samp-batches 15 --t-path saves/resnet56_cifar10/initial_train/model_epochs_163.pt --distill lsp2 --seed 8152 --betas 300 --lsp2-ws 4
 
 # AT + KD
 #python3 pmsp.py --t-model resnet56 --dataset cifar10 --prune-rates 0.6 --prune-mode filter-n-g-gm-1 --samp-batches 15 --t-path saves/resnet56_cifar10/initial_train/model_epochs_163.pt --distill at --seed 8152 --betas 1000

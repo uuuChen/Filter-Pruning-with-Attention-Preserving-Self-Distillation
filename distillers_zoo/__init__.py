@@ -6,3 +6,4 @@ from .AT import Attention
 from .SP import Similarity
 from .MAT import MultiAttention
 from .MSP import MultiSimilarity, MultiSimilarityPlotter
+from .ASP import AttenSimilarity

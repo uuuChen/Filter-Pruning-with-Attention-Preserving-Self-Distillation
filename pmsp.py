@@ -25,6 +25,7 @@ from distillers_zoo import (
     Attention,
     MultiAttention,
     MultiSimilarity,
+    AttenSimilarity,
     MultiSimilarityPlotter,
 )
 
@@ -129,6 +130,9 @@ class PMSPModelTrainer(Trainer):
         elif method == 'lsp2':
             is_block = True
             criterion = [LogitSimilarity2(window_size=self.args.lsp2_ws)]
+        elif method == 'asp':
+            is_group = True
+            criterion = [AttenSimilarity()]
         elif method == 'mat':
             is_block = True
             criterion = [MultiAttention(window_size=self.args.mat_ws)]
@@ -157,6 +161,9 @@ class PMSPModelTrainer(Trainer):
         elif method == 'lsp2':
             s_f = [(s_feat[1:-1], s_logit)]
             t_f = [(t_feat[1:-1], t_logit)]
+        elif method == 'asp':
+            s_f = [[s_feat[-2]]]  # Get g3 only
+            t_f = [[t_feat[-2]]]  # Get g3 only
         elif method == 'mat':
             s_f = [s_feat[1:-1]]
             t_f = [t_feat[1:-1]]
