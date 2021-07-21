@@ -83,6 +83,8 @@ class FiltersPruner(object):
                         min_max_scalar(get_l1_scores(f_w)))
         elif 'filter-n-g-gm-3' in mode:
             f_scores = min_max_scalar(get_gm_dists(f_w)) * min_max_scalar(get_l1_scores(f_g))
+        elif 'filter-r' in mode:
+            f_scores = np.random.rand(n_f)
         else:
             raise NameError
         rank_indices = np.argsort(f_scores)

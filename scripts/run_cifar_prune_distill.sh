@@ -38,3 +38,8 @@ python3 pmsp.py --t-model resnet56 --dataset cifar10 --prune-rates 0.6 --prune-m
 
 # MAT-MSP
 #python3 pmsp.py --t-model resnet56 --dataset cifar10 --prune-rates 0.6 --prune-mode filter-n-g-gm-1 --samp-batches 15 --t-path saves/resnet56_cifar10/initial_train/model_epochs_163.pt --distill msp_mat --seed 8152 --betas 500 1000 --mat-ws 3 --msp-ts 3
+
+# PLOT-FEAT
+#python3 pmsp.py --t-model resnet56  --dataset cifar100 --t-path saves/1625594199/model_best.pt --distill msp --seed 8152 --alpha 0.0 --betas 3000 --dev-idx 0 --msp-ts 3
+#python3 pmsp.py --t-model resnet20  --dataset cifar10 --t-path saves/1625413142/model_best.pt --distill msp --seed 8152 --alpha 0.0 --betas 3000 --dev-idx 0 --msp-ts 3
+#python3 pmsp.py --t-model resnet110  --dataset cifar10 --t-path saves/1625397042/model_best.pt --distill msp --seed 8152 --alpha 0.0 --betas 3000 --dev-idx 0 --msp-ts 3
