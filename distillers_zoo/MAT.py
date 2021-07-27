@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import math
 import torch.nn.functional as F
 
 
@@ -7,12 +8,14 @@ class MultiAttention(nn.Module):
     def __init__(self, window_size=None):
         super().__init__()
         self.w_s = window_size  # Size of the window
+        self.l_r = None
 
     def forward(self, s_g, t_g):
         # --------------------------------------------
-        # Shape of s_g (group) : (nl,), (bs, s_ch, s_h, s_h)
-        # Shape of t_g (group) : (nl,), (bs, t_ch, t_h, t_h)
+        # Shape of s_g (group) : (s_nl,), (bs, s_ch, s_h, s_h)
+        # Shape of t_g (group) : (t_nl,), (bs, t_ch, t_h, t_h)
         # --------------------------------------------
+        self.l_r = math.ceil(len(t_g) / len(s_g))
         loss = torch.mean(torch.stack([self.s_to_all_t_loss(s_f, t_g, i) for i, s_f in enumerate(s_g)]))  # (1,)
         return loss
 
@@ -31,11 +34,11 @@ class MultiAttention(nn.Module):
 
     def t_sample(self, t_g, s_idx):
         # --------------------------------------------
-        # Shape of t_g : (nl,), (bs, t_ch, t_h, t_h)
+        # Shape of r : (1,), (bs, t_ch, t_h, t_h)
         # --------------------------------------------
         if not self.w_s:
             return t_g
-        l = s_idx - (self.w_s - 1) // 2
+        l = self.l_r * s_idx
         r = l + self.w_s
         l = max(l, 0)
         r = min(r, len(t_g))
