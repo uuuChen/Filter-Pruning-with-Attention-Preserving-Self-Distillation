@@ -27,6 +27,7 @@ from distillers_zoo import (
     MultiSimilarity,
     AttenSimilarity,
     MultiSimilarityPlotter,
+    AFDBuilder
 )
 
 from tensorboardX import SummaryWriter
@@ -148,6 +149,11 @@ class PMSPModelTrainer(Trainer):
         elif method == 'at':
             is_group = True
             criterion = [Attention()]
+        elif method == 'afd':
+            is_block = True
+            builder = AFDBuilder()
+            AFD = builder(args, t_model=self.t_model, s_model=self.s_model).to(self.device)
+            criterion = [AFD]
         else:
             raise NotImplementedError(method)
         return criterion, is_group, is_block
@@ -180,6 +186,9 @@ class PMSPModelTrainer(Trainer):
         elif method == 'sp':
             s_f = [[s_feat[-2]]]  # Get g3 only
             t_f = [[t_feat[-2]]]  # Get g3 only
+        elif method == 'afd':
+            s_f = [s_feat[1:-1]]  # Get features f1 ~ f3
+            t_f = [t_feat[1:-1]]  # Get features f1 ~ f3
         else:
             raise NotImplementedError(method)
         return s_f, t_f
@@ -230,7 +239,7 @@ class PMSPModelTrainer(Trainer):
         logit = self.s_model(input)
         loss = self.criterion_cls(logit, target)
         top1, top5 = accuracy(logit, target, topk=(1, 5))
-        return {'loss': loss, 'top1': top1, 'top5': top5}
+        return {'loss': loss.item(), 'top1': top1.item(), 'top5': top5.item()}
 
     def _prune_s_model(self, do_prune):
         if not (do_prune and self.cur_epoch % self.args.prune_interval == 0):
