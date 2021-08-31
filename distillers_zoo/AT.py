@@ -10,9 +10,10 @@ class Attention(nn.Module):
     via Attention Transfer
     code: https://github.com/szagoruyko/attention-transfer
     """
-    def __init__(self, p=2):
+    def __init__(self, p=2, dataset=None):
         super(Attention, self).__init__()
         self.p = p
+        self.dataset = dataset
 
     def forward(self, s_g, t_g):
         # --------------------------------------------
@@ -40,4 +41,7 @@ class Attention(nn.Module):
         # --------------------------------------------
         # Shape of f : (bs, ch, h, h)
         # --------------------------------------------
-        return F.normalize(f.pow(self.p).mean(1).view(f.size(0), -1))  # (bs, h * h)
+        if self.dataset == 'imagenet':
+            return F.normalize(f.pow(self.p).sum(1).view(f.size(0), -1))  # (bs, h * h)
+        else:
+            return F.normalize(f.pow(self.p).mean(1).view(f.size(0), -1))  # (bs, h * h)

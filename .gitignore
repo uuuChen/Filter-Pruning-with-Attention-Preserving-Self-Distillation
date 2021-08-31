@@ -6,3 +6,10 @@ saves/
 .ipynb_checkpoints/
 *.DS_Store*
 encodings/
+pgad.py
+pwad.py
+quantize.py
+encode.py
+rand_graph_generator.py
+scripts/pgad/
+scripts/pwad/

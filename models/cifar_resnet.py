@@ -61,7 +61,7 @@ class CifarResNet(nn.Module):
     https://arxiv.org/abs/1512.03385.pdf
     """
 
-    def __init__(self, block, depth, num_classes):
+    def __init__(self, block, depth, num_classes=10):
         """ Constructor
         Args:
           depth: number of layers.
@@ -136,46 +136,46 @@ class CifarResNet(nn.Module):
         return x
 
 
-def resnet20(num_classes=10):
+def resnet20(**kwargs):
     """Constructs a ResNet-20 model for CIFAR-10 (by default)
     Args:
       num_classes (uint): number of classes
     """
-    model = CifarResNet(ResNetBasicblock, 20, num_classes)
+    model = CifarResNet(ResNetBasicblock, 20, **kwargs)
     return model
 
 
-def resnet32(num_classes=10):
+def resnet32(**kwargs):
     """Constructs a ResNet-32 model for CIFAR-10 (by default)
     Args:
       num_classes (uint): number of classes
     """
-    model = CifarResNet(ResNetBasicblock, 32, num_classes)
+    model = CifarResNet(ResNetBasicblock, 32, **kwargs)
     return model
 
 
-def resnet44(num_classes=10):
+def resnet44(**kwargs):
     """Constructs a ResNet-44 model for CIFAR-10 (by default)
     Args:
       num_classes (uint): number of classes
     """
-    model = CifarResNet(ResNetBasicblock, 44, num_classes)
+    model = CifarResNet(ResNetBasicblock, 44, **kwargs)
     return model
 
 
-def resnet56(num_classes=10):
+def resnet56(**kwargs):
     """Constructs a ResNet-56 model for CIFAR-10 (by default)
     Args:
       num_classes (uint): number of classes
     """
-    model = CifarResNet(ResNetBasicblock, 56, num_classes)
+    model = CifarResNet(ResNetBasicblock, 56, **kwargs)
     return model
 
 
-def resnet110(num_classes=10):
+def resnet110(**kwargs):
     """Constructs a ResNet-110 model for CIFAR-10 (by default)
     Args:
       num_classes (uint): number of classes
     """
-    model = CifarResNet(ResNetBasicblock, 110, num_classes)
+    model = CifarResNet(ResNetBasicblock, 110, **kwargs)
     return model

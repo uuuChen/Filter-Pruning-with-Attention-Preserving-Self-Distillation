@@ -147,7 +147,7 @@ class PMSPModelTrainer(Trainer):
             criterion = [Similarity()]
         elif method == 'at':
             is_group = True
-            criterion = [Attention()]
+            criterion = [Attention(dataset=self.args.dataset)]
         else:
             raise NotImplementedError(method)
         return criterion, is_group, is_block
@@ -162,8 +162,8 @@ class PMSPModelTrainer(Trainer):
             s_f = [(s_feat[1:-1], s_logit)]
             t_f = [(t_feat[1:-1], t_logit)]
         elif method == 'asp':
-            s_f = [[s_feat[-2]]]  # Get g3 only
-            t_f = [[t_feat[-2]]]  # Get g3 only
+            s_f = [[s_feat[-2]]]
+            t_f = [[t_feat[-2]]]
         elif method == 'mat':
             s_f = [s_feat[1:-1]]
             t_f = [t_feat[1:-1]]
@@ -175,11 +175,17 @@ class PMSPModelTrainer(Trainer):
             s_f = [s_logit]
             t_f = [t_logit]
         elif method == 'at':
-            s_f = [s_feat[1:-1]]  # Get features g1 ~ g3
-            t_f = [t_feat[1:-1]]  # Get features g1 ~ g3
+            if 'cifar' in self.args.dataset:
+                s_f = [s_feat[1:-1]]
+                t_f = [t_feat[1:-1]]
+            elif self.args.dataset == 'imagenet':
+                s_f = [s_feat[-3:-1]]
+                t_f = [t_feat[-3:-1]]
+            else:
+                raise NotImplementedError(self.args.dataset)
         elif method == 'sp':
-            s_f = [[s_feat[-2]]]  # Get g3 only
-            t_f = [[t_feat[-2]]]  # Get g3 only
+                s_f = [[s_feat[-2]]]
+                t_f = [[t_feat[-2]]]
         else:
             raise NotImplementedError(method)
         return s_f, t_f
@@ -286,8 +292,8 @@ def main():
     if args.s_model not in models.__dict__:
         raise NameError
     train_loader, eval_loader, num_classes = dataset.__dict__[args.dataset](args.batch_size)
-    t_model = models.__dict__[args.t_model](num_classes=num_classes)
-    s_model = models.__dict__[args.s_model](num_classes=num_classes)
+    t_model = models.__dict__[args.t_model](num_classes=num_classes, pretrained=True)
+    s_model = models.__dict__[args.s_model](num_classes=num_classes, pretrained=False)
     load_model(t_model, args.t_path, logger, device)
     load_model(s_model, args.s_path, logger, device)
     optimizer = optim.SGD(
