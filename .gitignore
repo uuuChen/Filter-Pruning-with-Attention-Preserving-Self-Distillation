@@ -13,3 +13,5 @@ encode.py
 rand_graph_generator.py
 scripts/pgad/
 scripts/pwad/
+scripts/run_quantize.sh
+scripts/run_pruning_imagenet.sh

@@ -82,7 +82,7 @@ if args.s_model is None:  # Pruning + Self Distillation
     args.s_path = args.t_path
 
 
-class PMSPModelTrainer(Trainer):
+class PrunedModelTrainer(Trainer):
     """  A trainer for gradually self-distillation combined with attention mechanism and hard or soft pruning. """
     def __init__(self, t_model, writer, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -292,8 +292,8 @@ def main():
     if args.s_model not in models.__dict__:
         raise NameError
     train_loader, eval_loader, num_classes = dataset.__dict__[args.dataset](args.batch_size)
-    t_model = models.__dict__[args.t_model](num_classes=num_classes, pretrained=True)
-    s_model = models.__dict__[args.s_model](num_classes=num_classes, pretrained=False)
+    t_model = models.__dict__[args.t_model](num_classes=num_classes)
+    s_model = models.__dict__[args.s_model](num_classes=num_classes)
     load_model(t_model, args.t_path, logger, device)
     load_model(s_model, args.s_path, logger, device)
     optimizer = optim.SGD(
@@ -301,7 +301,7 @@ def main():
     )
     base_trainer_cfg = (args, s_model, train_loader, eval_loader, optimizer, args.save_dir, device, logger)
     writer = SummaryWriter(log_dir=args.log_dir)  # For tensorboardX
-    trainer = PMSPModelTrainer(t_model, writer, *base_trainer_cfg)
+    trainer = PrunedModelTrainer(t_model, writer, *base_trainer_cfg)
     logger.log('\n'.join(map(str, vars(args).items())))
     if args.evaluate:
         trainer.eval()

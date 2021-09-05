@@ -49,6 +49,35 @@ def cifar100(batch_size):
     return train_loader, val_loader, num_classes
 
 
+def cinic10(batch_size):
+    num_classes = 10
+    data_dir = './data/cinic-10'
+    train_dir = os.path.join(data_dir, 'train')
+    val_dir = os.path.join(data_dir, 'val')
+    normalize = transforms.Normalize((0.4789, 0.4723, 0.4305), (0.2421, 0.2383, 0.2587))
+    train_loader = torch.utils.data.DataLoader(
+        datasets.ImageFolder(
+            train_dir,
+            transforms.Compose([
+                transforms.RandomHorizontalFlip(),
+                transforms.RandomCrop(32, padding=4),
+                transforms.ToTensor(),
+                normalize,
+            ])),
+        batch_size=batch_size, shuffle=True,
+        num_workers=4, pin_memory=True)
+    val_loader = torch.utils.data.DataLoader(
+        datasets.ImageFolder(
+            val_dir,
+            transforms.Compose([
+                transforms.ToTensor(),
+                normalize,
+            ])),
+        batch_size=batch_size, shuffle=False,
+        num_workers=4, pin_memory=True)
+    return train_loader, val_loader, num_classes
+
+
 def imagenet(batch_size):
     num_classes = 1000
     data_dir = './data/ImageNet2012'
