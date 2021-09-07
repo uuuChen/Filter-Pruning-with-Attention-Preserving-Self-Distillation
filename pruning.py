@@ -69,6 +69,8 @@ parser.add_argument('--alpha', type=float, default=0.9)  # For KL-divergence dis
 parser.add_argument('--betas', nargs='+', type=float, default=[50.0])  # For custom-method distillation
 parser.add_argument('--t-path', type=str, default=None)  # The .pt file path of teacher model
 parser.add_argument('--s-path', type=str, default=None)  # The .pt file path of student model
+parser.add_argument('--s-copy-t', action='store_true', default=False)  # During self-distillation, whether student
+# copy teacher during initialization
 parser.add_argument('--log-name', type=str, default='logs.txt')  # The name of the log file
 parser.add_argument('--dev-idx', type=int, default=0)  # The index of the used cuda device
 args = parser.parse_args()
@@ -79,7 +81,8 @@ args.log_dir = f'{args.save_dir}/log'
 args.log_path = f'saves/{args.log_name}'
 if args.s_model is None:  # Pruning + Self Distillation
     args.s_model = args.t_model
-    args.s_path = args.t_path
+    if args.s_copy_t:
+        args.s_path = args.t_path
 
 
 class PrunedModelTrainer(Trainer):
@@ -114,12 +117,12 @@ class PrunedModelTrainer(Trainer):
         self.t_model.eval()
         self.t_model = self.t_model.to(self.device)
 
-    def _mask_prune_weight_grad(self):
+    def _mask_pruned_filters_grad(self):
         conv_mask = self.s_pruner.get_conv_mask()
         for name, module in self.s_model.named_modules():
             if name in conv_mask:
                 grad = module.weight.grad
-                grad.data = grad.data * conv_mask[name]
+                grad.data *= conv_mask[name]
 
     def _init_kd(self, method):
         is_group = False
@@ -214,7 +217,7 @@ class PrunedModelTrainer(Trainer):
 
         # Set the gradient of the pruned weights to 0 if it's in the "hard prune mode"
         if self.do_hard_prune:
-            self._mask_prune_weight_grad()
+            self._mask_pruned_filters_grad()
 
         # Get performance metrics
         top1, top5 = accuracy(s_logit, target, topk=(1, 5))
