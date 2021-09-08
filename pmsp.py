@@ -100,6 +100,8 @@ class PMSPModelTrainer(Trainer):
         if self.do_dist:
             self.criterion_kd, self.is_group, self.is_block = self._init_kd(self.args.distill)
 
+        self.optimizer = self.configure_optimizers()
+
         self.s_pruner = FiltersPruner(
             self.s_model,
             self.optimizer,
@@ -282,6 +284,15 @@ class PMSPModelTrainer(Trainer):
                 best_top1 = eval_result['top1']
                 save_model(self.model, self._get_save_model_path(), self.logger)
 
+    def configure_optimizers(self):
+        trainable_list = nn.ModuleList([])
+        trainable_list.append(self.model)
+        if hasattr(self, 'criterion_kd'):
+            trainable_list += self.criterion_kd
+
+        optimizer = optim.SGD(trainable_list.parameters(), lr=self.args.lr, momentum=self.args.momentum, weight_decay=self.args.weight_decay, nesterov=True)
+        return optimizer
+
 
 def main():
     set_seeds(args.seed)
@@ -299,10 +310,8 @@ def main():
     s_model = models.__dict__[args.s_model](num_classes=num_classes)
     load_model(t_model, args.t_path, logger, device)
     load_model(s_model, args.s_path, logger, device)
-    optimizer = optim.SGD(
-        s_model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay, nesterov=True
-    )
-    base_trainer_cfg = (args, s_model, train_loader, eval_loader, optimizer, args.save_dir, device, logger)
+
+    base_trainer_cfg = (args, s_model, train_loader, eval_loader, None, args.save_dir, device, logger)
     writer = SummaryWriter(log_dir=args.log_dir)  # For tensorboardX
     trainer = PMSPModelTrainer(t_model, writer, *base_trainer_cfg)
     logger.log('\n'.join(map(str, vars(args).items())))
