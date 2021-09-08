@@ -70,6 +70,8 @@ parser.add_argument('--alpha', type=float, default=0.9)  # For KL-divergence dis
 parser.add_argument('--betas', nargs='+', type=float, default=[50.0])  # For custom-method distillation
 parser.add_argument('--t-path', type=str, default=None)  # The .pt file path of teacher model
 parser.add_argument('--s-path', type=str, default=None)  # The .pt file path of student model
+parser.add_argument('--s-copy-t', action='store_true', default=False)  # During self-distillation, whether student
+# copy teacher during initialization
 parser.add_argument('--log-name', type=str, default='logs.txt')  # The name of the log file
 parser.add_argument('--dev-idx', type=int, default=0)  # The index of the used cuda device
 args = parser.parse_args()
@@ -80,10 +82,11 @@ args.log_dir = f'{args.save_dir}/log'
 args.log_path = f'saves/{args.log_name}'
 if args.s_model is None:  # Pruning + Self Distillation
     args.s_model = args.t_model
-    args.s_path = args.t_path
+    if args.s_copy_t:
+        args.s_path = args.t_path
 
 
-class PMSPModelTrainer(Trainer):
+class PrunedModelTrainer(Trainer):
     """  A trainer for gradually self-distillation combined with attention mechanism and hard or soft pruning. """
     def __init__(self, t_model, writer, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -117,12 +120,12 @@ class PMSPModelTrainer(Trainer):
         self.t_model.eval()
         self.t_model = self.t_model.to(self.device)
 
-    def _mask_prune_weight_grad(self):
+    def _mask_pruned_filters_grad(self):
         conv_mask = self.s_pruner.get_conv_mask()
         for name, module in self.s_model.named_modules():
             if name in conv_mask:
                 grad = module.weight.grad
-                grad.data = grad.data * conv_mask[name]
+                grad.data *= conv_mask[name]
 
     def _init_kd(self, method):
         is_group = False
@@ -150,7 +153,7 @@ class PMSPModelTrainer(Trainer):
             criterion = [Similarity()]
         elif method == 'at':
             is_group = True
-            criterion = [Attention()]
+            criterion = [Attention(dataset=self.args.dataset)]
         elif method == 'afd':
             is_block = True
             builder = AFDBuilder()
@@ -170,8 +173,8 @@ class PMSPModelTrainer(Trainer):
             s_f = [(s_feat[1:-1], s_logit)]
             t_f = [(t_feat[1:-1], t_logit)]
         elif method == 'asp':
-            s_f = [[s_feat[-2]]]  # Get g3 only
-            t_f = [[t_feat[-2]]]  # Get g3 only
+            s_f = [[s_feat[-2]]]
+            t_f = [[t_feat[-2]]]
         elif method == 'mat':
             s_f = [s_feat[1:-1]]
             t_f = [t_feat[1:-1]]
@@ -183,14 +186,20 @@ class PMSPModelTrainer(Trainer):
             s_f = [s_logit]
             t_f = [t_logit]
         elif method == 'at':
-            s_f = [s_feat[1:-1]]  # Get features g1 ~ g3
-            t_f = [t_feat[1:-1]]  # Get features g1 ~ g3
+            if 'cifar' in self.args.dataset:
+                s_f = [s_feat[1:-1]]
+                t_f = [t_feat[1:-1]]
+            elif self.args.dataset == 'imagenet':
+                s_f = [s_feat[-3:-1]]
+                t_f = [t_feat[-3:-1]]
+            else:
+                raise NotImplementedError(self.args.dataset)
         elif method == 'sp':
-            s_f = [[s_feat[-2]]]  # Get g3 only
-            t_f = [[t_feat[-2]]]  # Get g3 only
+            s_f = [[s_feat[-2]]]
+            t_f = [[t_feat[-2]]]
         elif method == 'afd':
             s_f = [s_feat[1:-1]]  # Get features f1 ~ f3
-            t_f = [t_feat[1:-1]]  # Get features f1 ~ f3
+            t_f = [t_feat[1:-1]]  # Get features f1 ~ f3   
         else:
             raise NotImplementedError(method)
         return s_f, t_f
@@ -219,7 +228,7 @@ class PMSPModelTrainer(Trainer):
 
         # Set the gradient of the pruned weights to 0 if it's in the "hard prune mode"
         if self.do_hard_prune:
-            self._mask_prune_weight_grad()
+            self._mask_pruned_filters_grad()
 
         # Get performance metrics
         top1, top5 = accuracy(s_logit, target, topk=(1, 5))
@@ -313,7 +322,7 @@ def main():
 
     base_trainer_cfg = (args, s_model, train_loader, eval_loader, None, args.save_dir, device, logger)
     writer = SummaryWriter(log_dir=args.log_dir)  # For tensorboardX
-    trainer = PMSPModelTrainer(t_model, writer, *base_trainer_cfg)
+    trainer = PrunedModelTrainer(t_model, writer, *base_trainer_cfg)
     logger.log('\n'.join(map(str, vars(args).items())))
     if args.evaluate:
         trainer.eval()

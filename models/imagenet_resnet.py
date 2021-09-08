@@ -78,6 +78,9 @@ class Bottleneck(nn.Module):
         self.stride = stride
 
     def forward(self, x):
+        feat = list()
+        if isinstance(x, tuple):
+            x, feat = x
         residual = x
 
         out = self.conv1(x)
@@ -96,12 +99,13 @@ class Bottleneck(nn.Module):
 
         out += residual
         out = self.relu(out)
-        return out
+        feat.append(out)
+        return out, feat
 
 
 class ResNet(nn.Module):
 
-    def __init__(self, block, layers, num_classes=1000):
+    def __init__(self, block, layers, num_classes=1000, **kwargs):
         self.inplanes = 64
         super(ResNet, self).__init__()
         self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3,
@@ -141,20 +145,31 @@ class ResNet(nn.Module):
 
         return nn.Sequential(*layers)
 
-    def forward(self, x):
+    def forward(self, x, is_group_feat=False, is_block_feat=False):
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
         x = self.maxpool(x)
+        g0 = x
 
-        x = self.layer1(x)
-        x = self.layer2(x)
-        x = self.layer3(x)
-        x = self.layer4(x)
+        x, f1 = self.layer1(x)
+        g1 = x
+        x, f2 = self.layer2(x)
+        g2 = x
+        x, f3 = self.layer3(x)
+        g3 = x
+        x, f4 = self.layer4(x)
+        g4 = x
 
         x = self.avgpool(x)
         x = x.view(x.size(0), -1)
+        g5 = x
         x = self.fc(x)
+
+        if is_group_feat:
+            return [g0, g1, g2, g3, g4, g5], x
+        elif is_block_feat:
+            return [g0] + f1 + f2 + f3 + f4 + [g5], x
 
         return x
 
