@@ -178,14 +178,12 @@ class PrunedModelTrainer(Trainer):
             s_f = [s_logit]
             t_f = [t_logit]
         elif method == 'at':
-            if 'cifar' in self.args.dataset:
-                s_f = [s_feat[1:-1]]
-                t_f = [t_feat[1:-1]]
-            elif self.args.dataset == 'imagenet':
+            if self.args.dataset == 'imagenet':
                 s_f = [s_feat[-3:-1]]
                 t_f = [t_feat[-3:-1]]
             else:
-                raise NotImplementedError(self.args.dataset)
+                s_f = [s_feat[1:-1]]
+                t_f = [t_feat[1:-1]]
         elif method == 'sp':
                 s_f = [[s_feat[-2]]]
                 t_f = [[t_feat[-2]]]

@@ -82,7 +82,7 @@ def imagenet(batch_size):
     num_classes = 1000
     data_dir = './data/ImageNet2012'
     train_dir = os.path.join(data_dir, 'train')
-    val_dir = os.path.join(data_dir, 'val')
+    val_dir = os.path.join(data_dir, 'valid')
     normalize = transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
     train_loader = torch.utils.data.DataLoader(
         datasets.ImageFolder(
