@@ -27,6 +27,7 @@ from distillers_zoo import (
     MultiSimilarity,
     AttenSimilarity,
     MultiSimilarityPlotter,
+    AFDBuilder
 )
 
 from tensorboardX import SummaryWriter
@@ -103,6 +104,8 @@ class PrunedModelTrainer(Trainer):
         if self.do_dist:
             self.criterion_kd, self.is_group, self.is_block = self._init_kd(self.args.distill)
 
+        self.optimizer = self.configure_optimizers()
+
         self.s_pruner = FiltersPruner(
             self.s_model,
             self.optimizer,
@@ -153,6 +156,11 @@ class PrunedModelTrainer(Trainer):
         elif method == 'at':
             is_group = True
             criterion = [Attention(dataset=self.args.dataset)]
+        elif method == 'afd':
+            is_block = True
+            builder = AFDBuilder()
+            AFD = builder(args, t_model=self.t_model, s_model=self.s_model).to(self.device)
+            criterion = [AFD]
         else:
             raise NotImplementedError(method)
         return criterion, is_group, is_block
@@ -187,8 +195,11 @@ class PrunedModelTrainer(Trainer):
                 s_f = [s_feat[1:-1]]
                 t_f = [t_feat[1:-1]]
         elif method == 'sp':
-                s_f = [[s_feat[-2]]]
-                t_f = [[t_feat[-2]]]
+            s_f = [[s_feat[-2]]]
+            t_f = [[t_feat[-2]]]
+        elif method == 'afd':
+            s_f = [s_feat[1:-1]]  # Get features f1 ~ f3
+            t_f = [t_feat[1:-1]]  # Get features f1 ~ f3   
         else:
             raise NotImplementedError(method)
         return s_f, t_f
@@ -239,7 +250,7 @@ class PrunedModelTrainer(Trainer):
         logit = self.s_model(input)
         loss = self.criterion_cls(logit, target)
         top1, top5 = accuracy(logit, target, topk=(1, 5))
-        return {'loss': loss, 'top1': top1, 'top5': top5}
+        return {'loss': loss.item(), 'top1': top1.item(), 'top5': top5.item()}
 
     def _prune_s_model(self, do_prune):
         if not (do_prune and self.cur_epoch % self.args.prune_interval == 0):
@@ -282,6 +293,15 @@ class PrunedModelTrainer(Trainer):
                 best_top1 = eval_result['top1']
                 save_model(self.model, self._get_save_model_path(), self.logger)
 
+    def configure_optimizers(self):
+        trainable_list = nn.ModuleList([])
+        trainable_list.append(self.model)
+        if hasattr(self, 'criterion_kd'):
+            trainable_list += self.criterion_kd
+
+        optimizer = optim.SGD(trainable_list.parameters(), lr=self.args.lr, momentum=self.args.momentum, weight_decay=self.args.weight_decay, nesterov=True)
+        return optimizer
+
 
 def main():
     set_seeds(args.seed)
@@ -299,10 +319,8 @@ def main():
     s_model = models.__dict__[args.s_model](num_classes=num_classes)
     load_model(t_model, args.t_path, logger, device)
     load_model(s_model, args.s_path, logger, device)
-    optimizer = optim.SGD(
-        s_model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay, nesterov=True
-    )
-    base_trainer_cfg = (args, s_model, train_loader, eval_loader, optimizer, args.save_dir, device, logger)
+
+    base_trainer_cfg = (args, s_model, train_loader, eval_loader, None, args.save_dir, device, logger)
     writer = SummaryWriter(log_dir=args.log_dir)  # For tensorboardX
     trainer = PrunedModelTrainer(t_model, writer, *base_trainer_cfg)
     logger.log('\n'.join(map(str, vars(args).items())))

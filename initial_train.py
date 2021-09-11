@@ -65,7 +65,7 @@ class InitialModelTrainer(Trainer):
         logit = self.model(input)
         loss = self.cross_entropy(logit, target)
         top1, top5 = accuracy(logit, target, topk=(1, 5))
-        return {'loss': loss, 'top1': top1, 'top5': top5}
+        return {'loss': loss.item(), 'top1': top1.item(), 'top5': top5.item()}
 
 
 def main():
