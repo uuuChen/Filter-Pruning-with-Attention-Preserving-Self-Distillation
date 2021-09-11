@@ -67,6 +67,7 @@ parser.add_argument('--mat-ws', type=int, default=None)  # Window size for "MAT"
 parser.add_argument('--kd-t', type=float, default=4.0)  # Temperature for KL distillation
 parser.add_argument('--alpha', type=float, default=0.9)  # For KL-divergence distillation
 parser.add_argument('--betas', nargs='+', type=float, default=[50.0])  # For custom-method distillation
+parser.add_argument('--gamma', type=float, default=0.5)  # For our filter pruning method "N-G-GM"
 parser.add_argument('--t-path', type=str, default=None)  # The .pt file path of teacher model
 parser.add_argument('--s-path', type=str, default=None)  # The .pt file path of student model
 parser.add_argument('--s-copy-t', action='store_true', default=False)  # During self-distillation, whether student
@@ -107,6 +108,7 @@ class PrunedModelTrainer(Trainer):
             self.optimizer,
             self.train_loader,
             self.logger,
+            gamma=self.args.gamma,
             samp_batches=self.args.samp_batches,
             device=self.device,
             use_actPR=self.args.use_actPR,

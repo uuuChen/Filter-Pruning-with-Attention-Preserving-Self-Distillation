@@ -12,6 +12,7 @@ class FiltersPruner(object):
                  optimizer,
                  train_loader,
                  logger,
+                 gamma=0.5,
                  samp_batches=None,
                  device='cuda',
                  use_actPR=False,
@@ -20,9 +21,10 @@ class FiltersPruner(object):
         self.model = model
         self.optimizer = optimizer
         self.train_loader = train_loader
-        self.device = device
-        self.samp_batches = samp_batches
         self.logger = logger
+        self.gamma = gamma
+        self.samp_batches = samp_batches
+        self.device = device
         self.use_actPR = use_actPR
         self.use_greedy = use_greedy
 
@@ -77,7 +79,9 @@ class FiltersPruner(object):
         elif 'filter-g-gm-3' in mode:
             f_scores = get_gm_dists(f_w) * get_l1_scores(f_g) * get_l1_scores(f_w)
         elif 'filter-n-g-gm-1' in mode:
-            f_scores = min_max_scalar(get_gm_dists(f_w)) + min_max_scalar(get_l1_scores(f_g))
+            f_scores = (
+                self.gamma * min_max_scalar(get_gm_dists(f_w)) + (1 - self.gamma) * min_max_scalar(get_l1_scores(f_g))
+            )
         elif 'filter-n-g-gm-2' in mode:
             f_scores = (min_max_scalar(get_gm_dists(f_w)) + min_max_scalar(get_l1_scores(f_g)) +
                         min_max_scalar(get_l1_scores(f_w)))
