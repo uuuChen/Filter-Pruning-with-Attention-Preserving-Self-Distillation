@@ -9,8 +9,6 @@ import torch.nn.functional as F
 import torch
 import numpy as np
 
-from .utils import unique_shape, LAYER
-
 
 class nn_bn_relu(nn.Module):
     def __init__(self, nin, nout):
@@ -26,30 +24,50 @@ class nn_bn_relu(nn.Module):
 
 
 class AFDBuilder():
+    LAYER = {
+        'resnet20': np.arange(1, (20 - 2) // 2 + 1),  # 9
+        'resnet56': np.arange(1, (56 - 2) // 2 + 1),  # 27
+        'resnet110': np.arange(2, (110 - 2) // 2 + 1, 2),  # 27
+        'wrn40x2': np.arange(1, (40 - 4) // 2 + 1),  # 18
+        'wrn28x2': np.arange(1, (28 - 4) // 2 + 1),  # 12
+        'wrn16x2': np.arange(1, (16 - 4) // 2 + 1),  # 6
+        'resnet34': np.arange(1, (34 - 2) // 2 + 1),  # 16
+        'resnet18': np.arange(1, (18 - 2) // 2 + 1),  # 8
+        'resnet34im': np.arange(1, (34 - 2) // 2 + 1),  # 16
+        'resnet18im': np.arange(1, (18 - 2) // 2 + 1),  # 8
+    }
+
     def __init__(self):
         pass
-    
-    def __call__(self, args, t_model, s_model):
-        args.guide_layers = LAYER[args.t_model]
-        args.hint_layers = LAYER[args.s_model]
-        args.qk_dim = 128
 
-        if args.dataset == 'cifar100':
+    def unique_shape(selg, s_shapes):
+        n_s = []
+        unique_shapes = []
+        n = -1
+        for s_shape in s_shapes:
+            if s_shape not in unique_shapes:
+                unique_shapes.append(s_shape)
+                n += 1
+            n_s.append(n)
+        return n_s, unique_shapes
+
+    def __call__(self, args, t_model, s_model):
+        args.guide_layers = self.LAYER[args.t_model]
+        args.hint_layers = self.LAYER[args.s_model]
+        args.qk_dim = 128
+        if args.dataset in ['cifar10', 'cifar100', 'cinic10']:
             image_size = 32
         else:
             image_size = 224
-            
         data = torch.randn(2, 3, image_size, image_size)
         t_model.eval()
         s_model.eval()
         with torch.no_grad():
             feat_t, _ = t_model(data, is_block_feat=True)
             feat_s, _ = s_model(data, is_block_feat=True)
-        
         args.s_shapes = [feat_s[i].size() for i in args.hint_layers]
         args.t_shapes = [feat_t[i].size() for i in args.guide_layers]
-        args.n_t, args.unique_t_shapes = unique_shape(args.t_shapes)
-            
+        args.n_t, args.unique_t_shapes = self.unique_shape(args.t_shapes)
         return AFD(args)
     
     
