@@ -157,7 +157,7 @@ class PrunedModelTrainer(Trainer):
             criterion = [Attention(dataset=self.args.dataset)]
         elif method == 'afd':
             is_block = True
-            AFD = AFDBuilder()(args, t_model=self.t_model, s_model=self.s_model)
+            AFD = AFDBuilder()(args, t_model=self.t_model, s_model=self.s_model).to(self.device)
             criterion = [AFD]
             self.optimizer.add_param_group({'params': AFD.parameters()})
         else:
